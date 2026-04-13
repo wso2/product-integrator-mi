@@ -2280,7 +2280,7 @@
         <netty.tcnative.version>2.0.75.Final</netty.tcnative.version>
         <jacoco.agent.version>0.8.12</jacoco.agent.version>
         <activemq.version>5.2.0</activemq.version>
-        <activemq.broker.version>5.15.2</activemq.broker.version>
+        <activemq.broker.version>5.19.5</activemq.broker.version>
         <aries.version>1.1.0</aries.version>
         <aries.proxy.version>1.0.1</aries.proxy.version>
         <stax2.version>3.1.4</stax2.version>
