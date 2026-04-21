@@ -71,7 +71,7 @@
         <commons.lang.version>2.6.0.wso2v1</commons.lang.version>
         <maven.surefire.version>2.12.4</maven.surefire.version>
         <jacoco.version>0.8.8</jacoco.version>
-        <activemq.client.version>5.16.8</activemq.client.version>
+        <activemq.client.version>5.19.4</activemq.client.version>
         <pax.logging.api.version>2.3.2-wso2v1</pax.logging.api.version>
     </properties>
     <profiles>
