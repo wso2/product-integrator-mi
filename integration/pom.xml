@@ -778,7 +778,7 @@
         <netty.wso2.version>4.2.9.wso2v1</netty.wso2.version>
         <netty.tcnative.version>2.0.53.Final</netty.tcnative.version>
         <org.eclipse.paho.version>1.2.0</org.eclipse.paho.version>
-        <activemq.version>5.9.1</activemq.version>
+        <activemq.version>5.19.6</activemq.version>
         <ca.uhn.hapi.wso2.version>2.4.0.wso2v2</ca.uhn.hapi.wso2.version>
         <cglib.version>2.2</cglib.version>
         <javax.ws.rs.version>1.1.1</javax.ws.rs.version>
