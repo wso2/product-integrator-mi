@@ -765,7 +765,7 @@
     <properties>
         <ojdbc8.version>12.2.0.1</ojdbc8.version>
         <jcc.version>11.5.0.0</jcc.version>
-        <postgresql.version>42.2.12</postgresql.version>
+        <postgresql.version>42.7.11</postgresql.version>
         <mssql-jdbc.version>8.2.2.jre8</mssql-jdbc.version>
         <toml4j.version>0.7.2</toml4j.version>
         <commons-io.version>2.21.0</commons-io.version>
