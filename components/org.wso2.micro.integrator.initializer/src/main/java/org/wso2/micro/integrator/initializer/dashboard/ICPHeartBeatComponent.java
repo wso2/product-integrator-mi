@@ -20,11 +20,14 @@ package org.wso2.micro.integrator.initializer.dashboard;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonSyntaxException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.http.HttpEntity;
+import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
@@ -215,13 +218,13 @@ public class ICPHeartBeatComponent {
         try {
             // Build full payload to calculate hash
             JsonObject fullPayload = buildFullHeartbeatPayload(false);
-            String currentHash = fullPayload.get("runtimeHash").getAsString();
+            String currentHash = fullPayload.get(FIELD_RUNTIME_HASH).getAsString();
 
             // Build delta payload
             JsonObject deltaPayload = new JsonObject();
             deltaPayload.addProperty("heartbeatVersion", HEARTBEAT_VERSION);
             deltaPayload.addProperty(Constants.RUNTIME_ID, getRuntimeId());
-            deltaPayload.addProperty("runtimeHash", currentHash);
+            deltaPayload.addProperty(FIELD_RUNTIME_HASH, currentHash);
 
             // Create timestamp in Ballerina time:Utc format [seconds, nanoseconds_fraction]
             deltaPayload.add("timestamp", createBallerinaTimestamp());
@@ -302,12 +305,18 @@ public class ICPHeartBeatComponent {
             try (CloseableHttpResponse response = client.execute(httpPost)) {
                 // Response is auto-closed by try-with-resources to prevent resource leaks.
                 int statusCode = response.getStatusLine().getStatusCode();
-                if (statusCode == 409) {
+                if (statusCode == HttpStatus.SC_BAD_REQUEST || statusCode == HttpStatus.SC_UNAUTHORIZED
+                        || statusCode == HttpStatus.SC_CONFLICT) {
                     JsonObject jsonResponse = getJsonResponse(response);
-                    String detail = (jsonResponse != null && jsonResponse.has("body"))
-                            ? jsonResponse.get("body").getAsString() : "no details";
-                    log.error("ICP rejected heartbeat due to environment mismatch (HTTP 409): " + detail
-                            + ". Stopping heartbeat service — reconfigure the ICP JWT key.");
+                    String detail = extractErrorMessage(jsonResponse, statusCode);
+                    String errorType = statusCode == HttpStatus.SC_BAD_REQUEST ? "bad request" :
+                                      statusCode == HttpStatus.SC_UNAUTHORIZED ? "authentication failure" :
+                                      "environment mismatch";
+                    String remediation = statusCode == HttpStatus.SC_BAD_REQUEST ? "Check heartbeat payload and MI configuration." :
+                                        statusCode == HttpStatus.SC_UNAUTHORIZED ? "Reconfigure the ICP JWT key." :
+                                        "Check environment configuration for mismatch.";
+                    log.error("ICP rejected heartbeat due to " + errorType + " (HTTP " + statusCode + "): " + detail
+                            + ". Stopping heartbeat service — " + remediation);
                     new Thread(ICPHeartBeatComponent::stopICPHeartbeatExecutorService,
                             "ICP-Heartbeat-Stopper").start();
                     return null;
@@ -371,7 +380,7 @@ public class ICPHeartBeatComponent {
 
         // Hash (exclude timestamp for hash calculation)
         String hash = calculateHash(payload);
-        payload.addProperty("runtimeHash", hash);
+        payload.addProperty(FIELD_RUNTIME_HASH, hash);
 
         // Add timestamp if requested
         if (includeTimestamp) {
@@ -587,8 +596,8 @@ public class ICPHeartBeatComponent {
             }
 
             if (!payload.has("version") || payload.get("version").isJsonNull()) {
-                payload.addProperty("version", "4.4.0");
-                log.warn("Missing version, added default '4.4.0'");
+                payload.addProperty("version", "");
+                log.warn("Missing version, added default as empty");
             }
 
             // Validate nodeInfo structure
@@ -596,7 +605,7 @@ public class ICPHeartBeatComponent {
                     || !payload.get("nodeInfo").isJsonObject()) {
                 JsonObject nodeInfo = new JsonObject();
                 nodeInfo.addProperty("platformName", "wso2-mi");
-                nodeInfo.addProperty("platformVersion", "4.4.0");
+                nodeInfo.addProperty("platformVersion", "");
                 nodeInfo.addProperty("platformHome", System.getProperty("carbon.home", "/opt/wso2mi"));
                 nodeInfo.addProperty("osName", System.getProperty("os.name", "unknown"));
                 nodeInfo.addProperty("osVersion", System.getProperty("os.version", "unknown"));
@@ -613,8 +622,8 @@ public class ICPHeartBeatComponent {
             }
 
             // Ensure runtimeHash exists
-            if (!payload.has("runtimeHash") || payload.get("runtimeHash").isJsonNull()) {
-                payload.addProperty("runtimeHash", "");
+            if (!payload.has(FIELD_RUNTIME_HASH) || payload.get(FIELD_RUNTIME_HASH).isJsonNull()) {
+                payload.addProperty(FIELD_RUNTIME_HASH, "");
                 log.warn("Missing runtimeHash, added empty string");
             }
 
@@ -663,12 +672,12 @@ public class ICPHeartBeatComponent {
             minimalPayload.addProperty("environment", "dev");
             minimalPayload.addProperty("project", "default");
             minimalPayload.addProperty("component", "micro-integrator");
-            minimalPayload.addProperty("version", "4.4.0");
-            minimalPayload.addProperty("runtimeHash", "");
+            minimalPayload.addProperty("version", "");
+            minimalPayload.addProperty(FIELD_RUNTIME_HASH, "");
 
             JsonObject nodeInfo = new JsonObject();
             nodeInfo.addProperty("platformName", "wso2-mi");
-            nodeInfo.addProperty("platformVersion", "4.4.0");
+            nodeInfo.addProperty("platformVersion", "");
             minimalPayload.add("nodeInfo", nodeInfo);
 
             minimalPayload.add("artifacts", createEmptyArtifactsStructure());
@@ -844,7 +853,15 @@ public class ICPHeartBeatComponent {
      * Gets the MI version.
      */
     private static String getMicroIntegratorVersion() {
-        return System.getProperty("product.version", "4.4.0");
+        String version = MicroIntegratorBaseUtils.getServerConfiguration().getFirstProperty("Version");
+        if (log.isDebugEnabled()) {
+            log.debug("Retrieved MI version from configuration: " + version);
+        }
+        if (version == null) {
+            log.warn("MI version is not configured or empty. Defaulting to empty string.");
+            return "";
+        }
+        return version;
     }
 
     /**
@@ -887,18 +904,80 @@ public class ICPHeartBeatComponent {
     }
 
     /**
+     * Extracts error message from ICP error response.
+     * Expected format: {acknowledged: false, error: true, message: "error description"}
+     */
+    private static String extractErrorMessage(JsonObject jsonResponse, int statusCode) {
+        String defaultMessage = "HTTP " + statusCode;
+        if (jsonResponse == null) {
+            return defaultMessage;
+        }
+
+        if (jsonResponse.has(JSON_FIELD_MESSAGE)) {
+            JsonElement messageElement = jsonResponse.get(JSON_FIELD_MESSAGE);
+            if (messageElement.isJsonPrimitive()) {
+                return messageElement.getAsString();
+            }
+        }
+
+        return defaultMessage;
+    }
+
+    /**
      * Parses JSON response from HTTP response.
      */
     private static JsonObject getJsonResponse(CloseableHttpResponse response) {
+        String stringResponse = null;
         try {
             HttpEntity entity = response.getEntity();
-            String stringResponse = EntityUtils.toString(entity, "UTF-8");
-            Gson gson = new Gson();
-            return gson.fromJson(stringResponse, JsonObject.class);
-        } catch (Exception e) {
+            stringResponse = EntityUtils.toString(entity, "UTF-8");
             if (log.isDebugEnabled()) {
-                log.debug("Error parsing JSON response from ICP.", e);
+                log.debug("Parsing ICP response with status: " + response.getStatusLine().getStatusCode());
             }
+            if (stringResponse == null || stringResponse.trim().isEmpty()) {
+                if (log.isDebugEnabled()) {
+                    log.debug("ICP returned empty response");
+                }
+                return null;
+            }
+
+            Gson gson = new Gson();
+
+            try {
+                JsonObject jsonObject = gson.fromJson(stringResponse, JsonObject.class);
+                if (jsonObject != null) {
+                    return jsonObject;
+                }
+            } catch (JsonSyntaxException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Response is not a JSON object, attempting to parse as primitive");
+                }
+            }
+            try {
+                JsonElement jsonElement = gson.fromJson(stringResponse, JsonElement.class);
+                if (jsonElement != null && jsonElement.isJsonPrimitive()) {
+                    if (log.isDebugEnabled()) {
+                        log.debug("ICP returned a primitive response, wrapping in JsonObject: " + stringResponse);
+                    }
+                    JsonObject wrappedResponse = new JsonObject();
+                    wrappedResponse.add(JSON_FIELD_BODY, jsonElement);
+                    return wrappedResponse;
+                }
+            } catch (JsonSyntaxException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Response is not valid JSON, treating as plain string: " + stringResponse);
+                }
+                JsonObject wrappedResponse = new JsonObject();
+                wrappedResponse.addProperty(JSON_FIELD_BODY, stringResponse);
+                return wrappedResponse;
+            }
+            log.error("ICP returned unexpected JSON type. Response: " +
+                    (response != null ? response.getStatusLine() : "null") + ", Body: " + stringResponse);
+            return null;
+        } catch (Exception e) {
+            log.error("Error parsing JSON response from ICP. Response: " +
+                    (response != null ? response.getStatusLine() : "null") +
+                    ", Body: " + (stringResponse != null ? stringResponse : "null"), e);
             return null;
         }
     }
@@ -970,7 +1049,7 @@ public class ICPHeartBeatComponent {
                             .map(base -> base + api.getContext() + versionSuffix)
                             .collect(Collectors.toList());
                     apiObj.addProperty("url", apiUrls.get(0));
-                    com.google.gson.JsonArray urlArray = new com.google.gson.JsonArray();
+                    JsonArray urlArray = new JsonArray();
                     apiUrls.forEach(urlArray::add);
                     apiObj.add("urls", urlArray);
                 } else {
@@ -1752,6 +1831,11 @@ public class ICPHeartBeatComponent {
         appObj.addProperty(Constants.RUNTIME_ID, runtimeId);
         appObj.addProperty("version", carbonApp.getAppVersion());
         appObj.addProperty("status", status);
+
+        if ("faulty".equals(status) && carbonApp.getErrorMessage() != null) {
+            log.debug("Adding error message for faulty Carbon App: " + carbonApp.getAppNameWithVersion());
+            appObj.addProperty("errorMessage", carbonApp.getErrorMessage());
+        }
 
         // Collect artifacts contained in this Carbon App
         JsonArray artifacts = new JsonArray();

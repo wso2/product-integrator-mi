@@ -36,6 +36,7 @@ import org.wso2.micro.integrator.ntask.core.TaskRepository;
 import org.wso2.micro.integrator.ntask.core.TaskUtils;
 import org.wso2.micro.integrator.ntask.core.impl.AbstractQuartzTaskManager;
 import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
+import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
 import org.wso2.micro.integrator.ntask.core.internal.TasksDSComponent;
 
 import java.util.ArrayList;
@@ -43,6 +44,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -67,6 +69,7 @@ public class ScheduledTaskManager extends AbstractQuartzTaskManager {
     private TaskStore taskStore;
     private String localNodeId;
     private ClusterCoordinator clusterCoordinator;
+    private final boolean taskDeleteBarrierEnabled;
 
     private static final String REG_PROCESSOR_BASE_PATH = "/repository/components/org.apache.synapse.message.processor/";
     private static final String MP_STATE = "MESSAGE_PROCESSOR_STATE";
@@ -79,6 +82,9 @@ public class ScheduledTaskManager extends AbstractQuartzTaskManager {
         this.taskStore = taskStore;
         this.localNodeId = DataHolder.getInstance().getLocalNodeId();
         this.clusterCoordinator = DataHolder.getInstance().getClusterCoordinator();
+        this.taskDeleteBarrierEnabled = TaskHandlingConfigUtils.isTaskDeleteBarrierEnabled();
+        log.info("Clustered task delete barrier flow is " + (taskDeleteBarrierEnabled ? "enabled" : "disabled")
+                + ". Configure [" + TaskHandlingConfigUtils.TASK_DELETE_BARRIER_ENABLED_CONFIG + "] to control it.");
     }
 
     @Override
@@ -300,36 +306,23 @@ public class ScheduledTaskManager extends AbstractQuartzTaskManager {
 
         boolean result = this.deleteLocalTask(taskName);
 
-        if (clusterCoordinator == null) {
-            return result;
-        }
-
-        // This hits if and only if when hot deployment enabled so give the coordinator node to handle the task
-        // delete capability and give grace period to other nodes to update the local task states.
-        // Since soon after deleted the coordinator node will be assigning the task to other node and the node should
-        // be updated with the task state.
-
         boolean isCoordinationEnabled = DataHolder.getInstance().isCoordinationEnabledGlobally();
-        if (isCoordinationEnabled && !clusterCoordinator.isLeader()) {
-            log.warn("Hot deployment enabled. Hence the task " + taskName
-                    + " will be deleted by the coordinator node.");
-        }
-        if (isCoordinationEnabled && clusterCoordinator.isLeader() && deployedCoordinatedTasks.contains(taskName)) {
-            long hotDeploymentDelay = clusterCoordinator.getHeartbeatMaxRetryInterval();
-            try {
-                log.info("Waiting for " + hotDeploymentDelay + " ms to hotdeployment to settle.");
+        if (isCoordinationEnabled && deployedCoordinatedTasks.contains(taskName)) {
+            if (taskDeleteBarrierEnabled) {
                 try {
-                    Thread.sleep(hotDeploymentDelay); // Wait for nodes to settle
-                } catch (InterruptedException e) {
-                    // Ignore
+                    if (clusterCoordinator.isLeader()) {
+                        coordinateDeleteWithBarrier(taskName);
+                    } else {
+                        acknowledgeDeleteBarrier(taskName);
+                    }
+                } catch (TaskCoordinationException ex) {
+                    log.error("Error while removing tasks.", ex);
                 }
-                log.info("Deleting task " + taskName + " from the data base since this is a coordinated task.");
-                taskStore.deleteTasks(Collections.singletonList(taskName));
-            } catch (TaskCoordinationException ex) {
-                log.error("Error while removing tasks.", ex);
+                deployedCoordinatedTasks.remove(taskName);
+                locallyRunningCoordinatedTasks.remove(taskName);
+            } else {
+                deleteTaskWithLegacyDelay(taskName);
             }
-            deployedCoordinatedTasks.remove(taskName);
-            locallyRunningCoordinatedTasks.remove(taskName);
         }
         return result;
     }
@@ -521,6 +514,161 @@ public class ScheduledTaskManager extends AbstractQuartzTaskManager {
         public CoordinatedTask.States getState() {
 
             return state;
+        }
+    }
+
+    /**
+     * Legacy coordinated delete flow used when barrier feature flag is disabled.
+     * Non-leader nodes skip DB delete and leader waits heartbeat delay before deleting.
+     *
+     * @param taskName task name
+     */
+    private void deleteTaskWithLegacyDelay(String taskName) {
+        if (!clusterCoordinator.isLeader()) {
+            log.warn("Hot deployment enabled. Hence the task " + taskName
+                    + " will be deleted by the coordinator node.");
+            return;
+        }
+        long hotDeploymentDelay = clusterCoordinator.getHeartbeatMaxRetryInterval();
+        try {
+            log.info("Waiting for " + hotDeploymentDelay + " ms to hotdeployment to settle.");
+            try {
+                Thread.sleep(hotDeploymentDelay); // Wait for nodes to settle
+            } catch (InterruptedException e) {
+                // Ignore to preserve legacy behavior
+            }
+            log.info("Deleting task " + taskName + " from the data base since this is a coordinated task.");
+            taskStore.deleteTasks(Collections.singletonList(taskName));
+        } catch (TaskCoordinationException ex) {
+            log.error("Error while removing tasks.", ex);
+        }
+        deployedCoordinatedTasks.remove(taskName);
+        locallyRunningCoordinatedTasks.remove(taskName);
+    }
+
+    /**
+     * Leader path for coordinated task delete.
+     * Creates barrier rows, waits for worker acknowledgements (or deadline), and finalizes task-row deletion.
+     *
+     * @param taskName task name being hot-deployed
+     * @throws TaskCoordinationException when barrier operations fail
+     */
+    private void coordinateDeleteWithBarrier(String taskName) throws TaskCoordinationException {
+        long currentTime = System.currentTimeMillis();
+        long hotDeploymentDelay = clusterCoordinator.getHeartbeatMaxRetryInterval();
+        long deadlineAt = currentTime + hotDeploymentDelay;
+        String guardUuid = UUID.randomUUID().toString();
+        List<String> expectedNodes = clusterCoordinator.getAllNodeIds();
+        if (localNodeId != null && !expectedNodes.contains(localNodeId)) {
+            expectedNodes.add(localNodeId);
+        }
+        taskStore.createDeleteBarrier(taskName, guardUuid, localNodeId, expectedNodes, deadlineAt, currentTime);
+        taskStore.acknowledgeOpenDeleteBarrier(taskName, localNodeId, currentTime);
+        waitForDeleteBarrier(taskName, guardUuid, deadlineAt);
+        boolean deleted = taskStore.finalizeDeleteBarrier(taskName, guardUuid, System.currentTimeMillis());
+        log.info("Leader flow finalized delete barrier for task [" + taskName + "] with guard [" + guardUuid
+                + "]. Task row deleted: " + deleted);
+
+    }
+
+
+    /**
+     * Worker path for coordinated task delete.
+     * Tries to acknowledge the leader created barrier with a bounded retry window.
+     *
+     * @param taskName task name being hot deployed
+     * @throws TaskCoordinationException when acknowledgement operations fail
+     */
+    private void acknowledgeDeleteBarrier(String taskName) throws TaskCoordinationException {
+        // Barrier can be created by leader slightly after worker reaches delete path.
+        // Retry for the full heartbeat max retry interval, aligned with leader barrier deadline.
+        long ackWindowMillis = clusterCoordinator.getHeartbeatMaxRetryInterval();
+        long deadlineAt = System.currentTimeMillis() + ackWindowMillis;
+        boolean acked = false;
+        while (System.currentTimeMillis() <= deadlineAt) {
+            acked = taskStore.acknowledgeOpenDeleteBarrier(taskName, localNodeId, System.currentTimeMillis());
+            if (acked) {
+                break;
+            }
+            long remaining = deadlineAt - System.currentTimeMillis();
+            if (remaining <= 0) {
+                break;
+            }
+            try {
+                Thread.sleep(Math.min(remaining, 200));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if (!acked) {
+            bootstrapDeleteBarrierIfMissing(taskName);
+        }
+        log.info("Barrier acknowledgement for task [" + taskName + "] by node [" + localNodeId + "] : " + acked);
+
+    }
+
+    /**
+     * Worker create deleteBarrier path when no leader created barrier appears within ACK window.
+     * Uses guard compare and set ownership, so only one worker can create barrier rows for a task wave.
+     * This path does not finalize deletion, recovery flow will finalize later.
+     *
+     * @param taskName task name
+     * @return true if this worker won CAS and created barrier rows
+     * @throws TaskCoordinationException when barrier operations fail
+     */
+    private boolean bootstrapDeleteBarrierIfMissing(String taskName) throws TaskCoordinationException {
+        long currentTime = System.currentTimeMillis();
+        long hotDeploymentDelay = clusterCoordinator.getHeartbeatMaxRetryInterval();
+        long deadlineAt = currentTime + hotDeploymentDelay;
+        String observedGuard = taskStore.getCurrentDeleteGuardUuid(taskName);
+        String bootstrapGuard = UUID.randomUUID().toString();
+        List<String> expectedNodes = clusterCoordinator.getAllNodeIds();
+        if (localNodeId != null && !expectedNodes.contains(localNodeId)) {
+            expectedNodes.add(localNodeId);
+        }
+
+        boolean wonOwnership = taskStore.tryCreateDeleteBarrierWithGuardCas(taskName, observedGuard, bootstrapGuard,
+                localNodeId, expectedNodes, deadlineAt, currentTime);
+        if (!wonOwnership) {
+            // Another node has already claimed the guard CAS and will drive barrier finalize for this task.
+            log.warn("Bootstrap barrier ownership was not acquired by node [" + localNodeId + "] for task ["
+                    + taskName + "].");
+            return false;
+        }
+
+        // Worker bootstrap owner only opens and ACKs barrier state.
+        // Final delete is delegated to recovery path in this exception scenario.
+        taskStore.acknowledgeOpenDeleteBarrier(taskName, localNodeId, currentTime);
+        log.info("Node [" + localNodeId + "] created and acknowledged bootstrap delete barrier for task ["
+                + taskName + "] with guard [" + bootstrapGuard + "]. Finalization will be handled by recovery flow.");
+        return true;
+    }
+
+    /**
+     * Waits until all expected nodes acknowledge the delete barrier or the barrier deadline is reached.
+     *
+     * @param taskName task name
+     * @param guardUuid barrier token
+     * @param deadlineAt barrier deadline in epoch millis
+     * @throws TaskCoordinationException when acknowledgement-check queries fail
+     */
+    private void waitForDeleteBarrier(String taskName, String guardUuid, long deadlineAt)
+            throws TaskCoordinationException {
+        while (System.currentTimeMillis() < deadlineAt) {
+            if (taskStore.areAllExpectedNodesAcked(taskName, guardUuid)) {
+                return;
+            }
+            long remaining = deadlineAt - System.currentTimeMillis();
+            if (remaining <= 0) {
+                return;
+            }
+            try {
+                Thread.sleep(Math.min(remaining, 200));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 

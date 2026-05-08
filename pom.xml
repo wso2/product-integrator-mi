@@ -2107,7 +2107,7 @@
         <version.apache.felix.gogo.command>1.1.2</version.apache.felix.gogo.command>
         <version.equinox.p2.publisher.eclipse>1.5.0</version.equinox.p2.publisher.eclipse>
         <version.equinox.p2.publisher>1.6.0</version.equinox.p2.publisher>
-        <version.equinox.p2.transport.ecf>1.2.0</version.equinox.p2.transport.ecf>
+        <version.equinox.p2.transport.ecf>1.4.600</version.equinox.p2.transport.ecf>
 
         <!-- javax.xml.soap version -->
         <javax.xml.soap-api.version>1.4.0</javax.xml.soap-api.version>
@@ -2138,17 +2138,17 @@
         <carbon.p2.plugin.version>5.5.1</carbon.p2.plugin.version>
 
         <!-- Carbon kernel version-->
-        <carbon.kernel.version>4.9.30</carbon.kernel.version>
+        <carbon.kernel.version>4.11.18</carbon.kernel.version>
         <carbon.kernel.imp.pkg.version>[4.5.0,5.0.0)</carbon.kernel.imp.pkg.version>
         <version.jaxb.api>2.4.0-b180830.0359</version.jaxb.api>
         <com.sun.jaxb.version>2.3.0</com.sun.jaxb.version>
         <com.sun.jaxb.impl.version>2.3.1</com.sun.jaxb.impl.version>
-        <synapse.version>4.1.0-wso2v39</synapse.version>
+        <synapse.version>4.1.0-wso2v48</synapse.version>
         <imp.pkg.version.synapse>[4.1.0, 4.2.0)</imp.pkg.version.synapse>
         <carbon.crypto.version>1.1.3</carbon.crypto.version>
         <carbon.crypto.api.imp.pkg.version.range>[1.1.0,1.2.0)</carbon.crypto.api.imp.pkg.version.range>
         <carbon.data.version>4.5.2</carbon.data.version>
-        <securevault.version>1.2.0</securevault.version>
+        <securevault.version>1.2.1</securevault.version>
         <hashicorp.vault.version>5.1.0</hashicorp.vault.version>
         <carbon.identity.oauth.version>6.8.0</carbon.identity.oauth.version>
         <carbon.identity.oauth.imp.pkg.version>[6.1.0, 7.0.0)</carbon.identity.oauth.imp.pkg.version>
@@ -2157,7 +2157,7 @@
         <sap-adapter.feature.version>4.7.37</sap-adapter.feature.version>
 
         <cipher.tool.version>1.2.9</cipher.tool.version>
-        <axis2.transport.version>2.0.0-wso2v86</axis2.transport.version>
+        <axis2.transport.version>2.0.0-wso2v87</axis2.transport.version>
         <transport.http.netty.version>6.4.1</transport.http.netty.version>
 
         <esotericsoftware.kryo.version>3.0.3</esotericsoftware.kryo.version>
@@ -2165,14 +2165,14 @@
         <org.objenesis.version>2.6</org.objenesis.version>
 
         <!-- Apache Axis2 -->
-        <axis2.wso2.version>1.6.1-wso2v124</axis2.wso2.version>
+        <axis2.wso2.version>1.6.1-wso2v127</axis2.wso2.version>
         <!-- Please unify axis2 versions in future -->
         <axis2.wso2.integration.test.version>1.6.1-wso2v120</axis2.wso2.integration.test.version>
         <imp.pkg.version.axis2>[1.6.1, 1.7.0)</imp.pkg.version.axis2>
 
         <carbon.analytics.common.version>5.2.67</carbon.analytics.common.version>
         <carbon.analytics.common.imp.pkg.version>[5.2.0, 6.0.0)</carbon.analytics.common.imp.pkg.version>
-        <fasterxml.jackson.version>2.21.1</fasterxml.jackson.version>
+        <fasterxml.jackson.version>2.21.3</fasterxml.jackson.version>
         <fasterxml.jackson.datatype.version>2.21.0</fasterxml.jackson.datatype.version>
         <fasterxml.jackson.annotations.version>2.21</fasterxml.jackson.annotations.version>
         <com.hubspot.immutables.version>1.11.3</com.hubspot.immutables.version>
@@ -2188,11 +2188,11 @@
         <xmlsec.version>1.5.6-wso2v2</xmlsec.version>
         <jsonassert.version>1.5.1</jsonassert.version>
         <saml.common.util.version.range>[1.0.0,2.0.0)</saml.common.util.version.range>
-        <bouncycastle.orbit.version>1.83.0.wso2v1</bouncycastle.orbit.version>
+        <bouncycastle.orbit.version>1.84.0.wso2v1</bouncycastle.orbit.version>
         <orbit.version.poi.ooxml>5.5.1.wso2v1</orbit.version.poi.ooxml>
         <org.wso2.json.version>3.0.0.wso2v8</org.wso2.json.version>
         <version.equinox.http.servlet>1.8.100</version.equinox.http.servlet>
-        <version.tomcat>11.0.18</version.tomcat>
+        <version.tomcat>11.0.21</version.tomcat>
         <orbit.version.tomcat.jsp.api>${version.tomcat}.wso2v1</orbit.version.tomcat.jsp.api>
         <orbit.version.tomcat.el.api>${version.tomcat}.wso2v1</orbit.version.tomcat.el.api>
         <orbit.version.tomcat.servlet.api>${version.tomcat}.wso2v1</orbit.version.tomcat.servlet.api>
@@ -2219,7 +2219,7 @@
         <version.annogen>0.1.0.wso2v1</version.annogen>
         <version.backport.util.concurrent>3.1.0.wso2v1</version.backport.util.concurrent>
         <version.commons.fileupload>1.6.0.wso2v1</version.commons.fileupload>
-        <orbit.version.commons.httpclient>3.1.0-wso2v7</orbit.version.commons.httpclient>
+        <orbit.version.commons.httpclient>3.1.0-wso2v9</orbit.version.commons.httpclient>
         <orbit.version.commons.collection>3.2.2.wso2v1</orbit.version.commons.collection>
         <version.compass>2.0.1.wso2v2</version.compass>
         <orbit.version.commons.lang>2.6.0.wso2v1</orbit.version.commons.lang>
@@ -2227,13 +2227,13 @@
         <orbit.version.poi>3.17.0.wso2v1</orbit.version.poi>
         <orbit.version.poi.scratchpad>5.5.1.wso2v1</orbit.version.poi.scratchpad>
         <slf4j.version>1.7.36</slf4j.version>
-        <version.log4j.core>2.25.3</version.log4j.core>
+        <version.log4j.core>2.25.4</version.log4j.core>
         <version.jaxb>2.2.5.wso2v1</version.jaxb>
         <javasysmon.version>0.3.3.wso2v1</javasysmon.version>
         <version.eclipse.ecj>4.4.2</version.eclipse.ecj>
         <version.com.google.code.gson>2.13.2</version.com.google.code.gson>
-        <bcprov-jdk18on.version>1.83</bcprov-jdk18on.version>
-        <bcpg-jdk18on.version>1.83</bcpg-jdk18on.version>
+        <bcprov-jdk18on.version>1.84</bcprov-jdk18on.version>
+        <bcpg-jdk18on.version>1.84</bcpg-jdk18on.version>
         <bcutil-jdk18on.version>1.83</bcutil-jdk18on.version>
         <tukaani.xz.version>1.9</tukaani.xz.version>
         <osgi.service.prefs.version>1.1.2</osgi.service.prefs.version>
@@ -2260,8 +2260,8 @@
         <axis2.mar.maven.plugin>1.5.2</axis2.mar.maven.plugin>
 
         <!--PAX Logging related dependency versions-->
-        <pax.logging.api.version>2.3.2-wso2v1</pax.logging.api.version>
-        <pax.logging.log4j2.version>2.3.2-wso2v2</pax.logging.log4j2.version>
+        <pax.logging.api.version>2.3.2-wso2v3</pax.logging.api.version>
+        <pax.logging.log4j2.version>2.3.2-wso2v3</pax.logging.log4j2.version>
         <org.apache.commons.logging.version>1.1.1</org.apache.commons.logging.version>
         <version.eclipse.equinox.cm>1.6.300</version.eclipse.equinox.cm>
         <version.eclipse.equinox.event>1.5.100</version.eclipse.equinox.event>
@@ -2295,7 +2295,7 @@
         <commons.math.version>3.6.1</commons.math.version>
         <commons.net.version>3.10.0</commons.net.version>
 
-        <diagnostics.tool.version>1.1.2</diagnostics.tool.version>
+        <diagnostics.tool.version>1.1.4</diagnostics.tool.version>
         <jsch.version>2.27.7</jsch.version>
 
         <config.mapper.version>1.1.0</config.mapper.version>
@@ -2412,7 +2412,7 @@
         <bson4jackson.orbit.version>2.18.0</bson4jackson.orbit.version>
 
         <saxon.orbit.version>8.9.0.wso2v2</saxon.orbit.version>
-        <commons-httpclient.orbit.version>3.1.0-wso2v7</commons-httpclient.orbit.version>
+        <commons-httpclient.orbit.version>3.1.0-wso2v9</commons-httpclient.orbit.version>
         <htmlcleaner.orbit.version>2.1.0.wso2v1</htmlcleaner.orbit.version>
         <jboss-transaction-api.version>1.0.1.Final</jboss-transaction-api.version>
         <ojdbc.version>6</ojdbc.version> <!--todo need to check for latest - rajith-->
@@ -2503,7 +2503,7 @@
         <graalvm.version>25.0.2</graalvm.version>
         <icu.version>78.2</icu.version>
         <sparsebitset.version>1.3</sparsebitset.version>
-        <org.bouncycastle.bc.version>1.83</org.bouncycastle.bc.version>
+        <org.bouncycastle.bc.version>1.84</org.bouncycastle.bc.version>
         <failureaccess.version>1.0.3</failureaccess.version>
         <commons.lang.version>2.6</commons.lang.version>
         <orbit.version.json>3.0.0.wso2v8</orbit.version.json>

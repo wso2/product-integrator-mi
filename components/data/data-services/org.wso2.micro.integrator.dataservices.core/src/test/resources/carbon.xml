@@ -630,7 +630,7 @@
     -->
     <FeatureRepository>
 	    <RepositoryName>default repository</RepositoryName>
-	    <RepositoryURL>http://dist.wso2.org/p2/carbon/releases/4.5.0-SNAPSHOT</RepositoryURL>
+	    <RepositoryURL>http://dist.wso2.org/p2/carbon/releases/4.6.0-SNAPSHOT</RepositoryURL>
     </FeatureRepository>
 
     <!--

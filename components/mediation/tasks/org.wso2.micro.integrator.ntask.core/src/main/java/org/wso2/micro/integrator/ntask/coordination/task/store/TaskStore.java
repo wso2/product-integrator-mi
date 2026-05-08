@@ -62,6 +62,17 @@ public class TaskStore {
     }
 
     /**
+     * Retrieves latest delete guard updated time across all tasks.
+     *
+     * @return latest guard UPDATED_AT, or -1 when no guard row exists
+     * @throws TaskCoordinationException if operation fails
+     */
+    public long getLatestDeleteGuardUpdatedAt() throws TaskCoordinationException {
+
+        return rdmbsConnector.getLatestDeleteGuardUpdatedAt();
+    }
+
+    /**
      * Retrieves the list of tasks.
      *
      * @param nodeID - Id of the node, for which the tasks need to be retrieved.
@@ -92,6 +103,19 @@ public class TaskStore {
     public void deleteTasks(List<String> coordinatedTasks) throws TaskCoordinationException {
 
         rdmbsConnector.deleteTasks(coordinatedTasks);
+    }
+
+    /**
+     * Remove task entries only when their state does not match the excluded state.
+     *
+     * @param tasks         - List of tasks to be removed.
+     * @param excludedState - State value that should be skipped.
+     * @return list of task names that were skipped because their state matched the excluded state.
+     */
+    public List<String> deleteTasksIfStateNotMatch(List<String> tasks, String excludedState)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.deleteTasksIfStateNotMatch(tasks, excludedState);
     }
 
     /**
@@ -188,6 +212,17 @@ public class TaskStore {
     }
 
     /**
+     * Retrieve raw task state value from DB.
+     *
+     * @param taskName name of the task
+     * @return raw state value or null when task row does not exist
+     * @throws TaskCoordinationException if something goes wrong while doing db read
+     */
+    public String getTaskStateValue(String taskName) throws TaskCoordinationException {
+        return rdmbsConnector.getTaskStateValue(taskName);
+    }
+
+    /**
      * Update the state of task.
      *
      * @param taskName     Name of the task.
@@ -224,6 +259,107 @@ public class TaskStore {
 
     public String getMessageProcessorTaskState(String taskName) {
         return rdmbsConnector.getMessageProcessorState(taskName);
+    }
+
+    /**
+     * Opens a delete barrier for the given task.
+     *
+     * @param taskName task name
+     * @param guardUuid barrier token
+     * @param ownerNodeId owner node id
+     * @param expectedNodeIds expected nodes for acknowledgement
+     * @param deadlineAt barrier deadline in epoch millis
+     * @param updatedAt updated timestamp in epoch millis
+     * @throws TaskCoordinationException if operation fails
+     */
+    public void createDeleteBarrier(String taskName, String guardUuid, String ownerNodeId, List<String> expectedNodeIds,
+                                    long deadlineAt, long updatedAt) throws TaskCoordinationException {
+        rdmbsConnector.createDeleteBarrier(taskName, guardUuid, ownerNodeId, expectedNodeIds, deadlineAt, updatedAt);
+    }
+
+    /**
+     * Reads the current guard token for a task.
+     *
+     * @param taskName task name
+     * @return current guard token or null when no guard exists
+     * @throws TaskCoordinationException if operation fails
+     */
+    public String getCurrentDeleteGuardUuid(String taskName) throws TaskCoordinationException {
+        return rdmbsConnector.getCurrentDeleteGuardUuid(taskName);
+    }
+
+    /**
+     * Attempts worker bootstrap of delete barrier by compare and set claiming the guard token.
+     * Only one worker can win and create the barrier for a task wave.
+     *
+     * @param taskName task name
+     * @param expectedGuardUuid guard observed by worker before CAS (nullable)
+     * @param newGuardUuid candidate guard token for bootstrap owner
+     * @param ownerNodeId bootstrap owner node id
+     * @param expectedNodeIds expected nodes for acknowledgement
+     * @param deadlineAt barrier deadline in epoch millis
+     * @param updatedAt updated timestamp in epoch millis
+     * @return true if this worker won CAS and created barrier rows
+     * @throws TaskCoordinationException if operation fails
+     */
+    public boolean tryCreateDeleteBarrierWithGuardCas(String taskName, String expectedGuardUuid, String newGuardUuid,
+                                                      String ownerNodeId, List<String> expectedNodeIds, long deadlineAt,
+                                                      long updatedAt) throws TaskCoordinationException {
+        return rdmbsConnector.tryCreateDeleteBarrierWithGuardCas(taskName, expectedGuardUuid, newGuardUuid, ownerNodeId,
+                expectedNodeIds, deadlineAt, updatedAt);
+    }
+
+    /**
+     * Acknowledges open barrier for a task from current node.
+     *
+     * @param taskName task name
+     * @param nodeId node id
+     * @param ackedAt ack timestamp in epoch millis
+     * @return true if open barrier was found and acknowledged
+     * @throws TaskCoordinationException if operation fails
+     */
+    public boolean acknowledgeOpenDeleteBarrier(String taskName, String nodeId, long ackedAt)
+            throws TaskCoordinationException {
+        return rdmbsConnector.acknowledgeOpenDeleteBarrier(taskName, nodeId, ackedAt);
+    }
+
+    /**
+     * Checks if all expected nodes acknowledged barrier for a task.
+     *
+     * @param taskName task name
+     * @param guardUuid barrier token
+     * @return true if all expected nodes acknowledged
+     * @throws TaskCoordinationException if operation fails
+     */
+    public boolean areAllExpectedNodesAcked(String taskName, String guardUuid) throws TaskCoordinationException {
+        return rdmbsConnector.areAllExpectedNodesAcked(taskName, guardUuid);
+    }
+
+    /**
+     * Finalizes delete barrier and attempts task row removal from .
+     *
+     * @param taskName task name
+     * @param guardUuid barrier token
+     * @param currentTime current time in epoch millis
+     * @return true when task row delete path completed
+     * @throws TaskCoordinationException if operation fails
+     */
+    public boolean finalizeDeleteBarrier(String taskName, String guardUuid, long currentTime)
+            throws TaskCoordinationException {
+        return rdmbsConnector.finalizeDeleteBarrier(taskName, guardUuid, currentTime);
+    }
+
+    /**
+     * Recovers expired/abandoned open barriers.
+     *
+     * @param liveNodeIds currently live nodes
+     * @param currentTime current time in epoch millis
+     * @return recovered task names whose delete barriers were finalized
+     * @throws TaskCoordinationException if operation fails
+     */
+    public List<String> recoverExpiredOrAbandonedDeleteBarriers(List<String> liveNodeIds, long currentTime)
+            throws TaskCoordinationException {
+        return rdmbsConnector.recoverExpiredOrAbandonedDeleteBarriers(liveNodeIds, currentTime);
     }
 
 }

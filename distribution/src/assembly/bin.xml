@@ -697,7 +697,7 @@
                 <include>commons-net:commons-net</include>
                 <include>com.github.mwiede:jsch</include>
                 <include>org.wso2.runtime.diagnostics:runtime-diagnostics-tool:jar</include>
-                <include>org.wso2.ei:org.wso2.micro.integrator.diagnostics:jar</include>
+                <include>org.wso2.ei:org.wso2.micro.integrator.mediation.diagnostics:jar</include>
                 <include>org.graalvm.sdk:nativeimage:jar</include>
                 <include>org.graalvm.polyglot:polyglot:jar</include>
                 <include>org.graalvm.sdk:word:jar</include>

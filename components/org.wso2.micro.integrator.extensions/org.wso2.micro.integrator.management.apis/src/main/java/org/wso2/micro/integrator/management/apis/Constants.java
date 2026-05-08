@@ -28,6 +28,7 @@ public class Constants {
     public static final String PREFIX_APIS = "/apis";
     public static final String PREFIX_CARBON_APPS = "/applications";
     public static final String PATH_PARAM_CARBON_APP_NAME = "/" + "{name}";
+    public static final String PATH_PARAM_CARBON_APP_FAULT = PATH_PARAM_CARBON_APP_NAME + "/fault";
     public static final String PREFIX_ENDPOINTS = "/endpoints";
     public static final String PREFIX_INBOUND_ENDPOINTS = "/inbound-endpoints";
     public static final String PREFIX_PROXY_SERVICES = "/proxy-services";

@@ -27,6 +27,10 @@ public class TaskQueryHelper {
 
     //task table Name
     public static final String TABLE_NAME = "COORDINATED_TASK_TABLE";
+    public static final String TASK_DELETE_GUARD_TABLE = "TASK_DELETE_GUARD";
+    public static final String TASK_DELETE_BARRIER_TABLE = "TASK_DELETE_BARRIER";
+    public static final String TASK_DELETE_BARRIER_EXPECTED_TABLE = "TASK_DELETE_BARRIER_EXPECTED";
+    public static final String TASK_DELETE_BARRIER_ACK_TABLE = "TASK_DELETE_BARRIER_ACK";
 
     //message processor table Name
     public static final String MP_TABLE_NAME = "MP_STATE_TABLE";
@@ -39,6 +43,17 @@ public class TaskQueryHelper {
     public static final String TASK_NAME = "TASK_NAME";
     public static final String DESTINED_NODE_ID = "DESTINED_NODE_ID";
     public static final String TASK_STATE = "TASK_STATE";
+    public static final String GUARD_UUID = "GUARD_UUID";
+    public static final String OWNER_NODE_ID = "OWNER_NODE_ID";
+    public static final String STATUS = "STATUS";
+    public static final String DEADLINE_AT = "DEADLINE_AT";
+    public static final String UPDATED_AT = "UPDATED_AT";
+    public static final String NODE_ID = "NODE_ID";
+    public static final String ACKED_AT = "ACKED_AT";
+
+    public static final String BARRIER_STATUS_OPEN = "OPEN";
+    public static final String BARRIER_STATUS_FINALIZING = "FINALIZING";
+    public static final String TASK_DELETE_PENDING_STATE = "DELETE_PENDING";
 
     private static final String TASK_STATE_CONST =
             "( CASE " + TASK_STATE + " WHEN '" + CoordinatedTask.States.RUNNING + "' THEN '"
@@ -78,7 +93,8 @@ public class TaskQueryHelper {
 
     static final String RETRIEVE_UNASSIGNED_NOT_COMPLETED_TASKS =
             "SELECT " + TASK_NAME + " FROM " + TABLE_NAME + " WHERE  " + DESTINED_NODE_ID + " IS NULL AND " + TASK_STATE
-                    + " !='" + CoordinatedTask.States.COMPLETED + "'";
+                    + " !='" + CoordinatedTask.States.COMPLETED + "' AND " + TASK_STATE + " !='"
+                    + TASK_DELETE_PENDING_STATE + "'";
 
     static final String RETRIEVE_TASKS_OF_NODE =
             "SELECT " + TASK_NAME + " FROM " + TABLE_NAME + "  WHERE " + DESTINED_NODE_ID + " =? AND " + TASK_STATE
@@ -108,6 +124,96 @@ public class TaskQueryHelper {
     static final String GET_ALL_ASSIGNED_INCOMPLETE_TASKS =
             "SELECT * FROM " + TABLE_NAME + " WHERE " + DESTINED_NODE_ID + " IS NOT NULL AND " + TASK_STATE + " != '"
                     + CoordinatedTask.States.COMPLETED + "'";
+
+    static final String INSERT_TASK_DELETE_GUARD =
+            "INSERT INTO " + TASK_DELETE_GUARD_TABLE + " (" + TASK_NAME + ", " + GUARD_UUID + ", " + UPDATED_AT
+                    + ") VALUES (?,?,?)";
+
+    static final String UPDATE_TASK_DELETE_GUARD =
+            "UPDATE " + TASK_DELETE_GUARD_TABLE + " SET " + GUARD_UUID + " = ?, " + UPDATED_AT + " = ? WHERE "
+                    + TASK_NAME + " = ?";
+
+    static final String UPDATE_TASK_DELETE_GUARD_IF_MATCH =
+            "UPDATE " + TASK_DELETE_GUARD_TABLE + " SET " + GUARD_UUID + " = ?, " + UPDATED_AT + " = ? WHERE "
+                    + TASK_NAME + " = ? AND " + GUARD_UUID + " = ?";
+
+    static final String UPDATE_TASK_DELETE_GUARD_TIMESTAMP_IF_MATCH =
+            "UPDATE " + TASK_DELETE_GUARD_TABLE + " SET " + UPDATED_AT + " = ? WHERE " + TASK_NAME
+                    + " = ? AND " + GUARD_UUID + " = ?";
+
+    static final String SELECT_TASK_DELETE_GUARD =
+            "SELECT " + GUARD_UUID + " FROM " + TASK_DELETE_GUARD_TABLE + " WHERE " + TASK_NAME + " = ?";
+
+    static final String SELECT_MAX_TASK_DELETE_GUARD_UPDATED_AT =
+            "SELECT MAX(" + UPDATED_AT + ") FROM " + TASK_DELETE_GUARD_TABLE;
+
+    static final String INSERT_TASK_DELETE_BARRIER =
+            "INSERT INTO " + TASK_DELETE_BARRIER_TABLE + " (" + TASK_NAME + ", " + GUARD_UUID + ", "
+                    + OWNER_NODE_ID + ", " + STATUS + ", " + DEADLINE_AT + ", " + UPDATED_AT
+                    + ") VALUES (?,?,?,?,?,?)";
+
+    static final String INSERT_TASK_DELETE_BARRIER_EXPECTED =
+            "INSERT INTO " + TASK_DELETE_BARRIER_EXPECTED_TABLE + " (" + TASK_NAME + ", " + GUARD_UUID + ", "
+                    + NODE_ID + ") VALUES (?,?,?)";
+
+    static final String INSERT_TASK_DELETE_BARRIER_ACK =
+            "INSERT INTO " + TASK_DELETE_BARRIER_ACK_TABLE + " (" + TASK_NAME + ", " + GUARD_UUID + ", " + NODE_ID
+                    + ", " + ACKED_AT + ") VALUES (?,?,?,?)";
+
+    static final String UPDATE_TASK_DELETE_BARRIER_ACK =
+            "UPDATE " + TASK_DELETE_BARRIER_ACK_TABLE + " SET " + ACKED_AT + " = ? WHERE " + TASK_NAME + " = ? AND "
+                    + GUARD_UUID + " = ? AND " + NODE_ID + " = ?";
+
+    static final String UPDATE_TASK_DELETE_BARRIER_STATUS =
+            "UPDATE " + TASK_DELETE_BARRIER_TABLE + " SET " + STATUS + " = ?, " + UPDATED_AT + " = ? WHERE "
+                    + TASK_NAME + " = ? AND " + GUARD_UUID + " = ? AND " + STATUS + " = ?";
+
+    static final String UPDATE_TASK_DELETE_BARRIER_TIMESTAMP =
+            "UPDATE " + TASK_DELETE_BARRIER_TABLE + " SET " + UPDATED_AT + " = ? WHERE " + TASK_NAME + " = ? AND "
+                    + GUARD_UUID + " = ?";
+
+    static final String UPDATE_TASK_STATUS_TO_DELETE_PENDING =
+            "UPDATE " + TABLE_NAME + " SET " + DESTINED_NODE_ID + " = NULL , " + TASK_STATE + " = '"
+                    + TASK_DELETE_PENDING_STATE + "' WHERE " + TASK_NAME + " = ? AND " + TASK_STATE + " != '"
+                    + CoordinatedTask.States.COMPLETED + "'";
+
+    static final String DELETE_TASK_IF_STATE_MATCH =
+            "DELETE FROM " + TABLE_NAME + " WHERE " + TASK_NAME + " = ? AND " + TASK_STATE + " = ?";
+
+    static final String DELETE_TASK_IF_STATE_NOT_MATCH =
+            "DELETE FROM " + TABLE_NAME + " WHERE " + TASK_NAME + " = ? AND " + TASK_STATE + " <> ?";
+
+    static final String SELECT_OPEN_TASK_DELETE_BARRIER_BY_TASK_AND_GUARD =
+            "SELECT " + TASK_NAME + ", " + GUARD_UUID + ", " + OWNER_NODE_ID + ", " + STATUS + ", " + DEADLINE_AT
+                    + ", " + UPDATED_AT + " FROM " + TASK_DELETE_BARRIER_TABLE + " WHERE " + TASK_NAME + " = ? AND "
+                    + GUARD_UUID + " = ? AND " + STATUS + " = ?";
+
+    static final String SELECT_OPEN_TASK_DELETE_BARRIERS =
+            "SELECT " + TASK_NAME + ", " + GUARD_UUID + ", " + OWNER_NODE_ID + ", " + STATUS + ", " + DEADLINE_AT
+                    + ", " + UPDATED_AT + " FROM " + TASK_DELETE_BARRIER_TABLE + " WHERE " + STATUS + " = ?";
+
+    static final String SELECT_TASK_DELETE_BARRIER =
+            "SELECT " + TASK_NAME + ", " + GUARD_UUID + ", " + OWNER_NODE_ID + ", " + STATUS + ", " + DEADLINE_AT
+                    + ", " + UPDATED_AT + " FROM " + TASK_DELETE_BARRIER_TABLE + " WHERE " + TASK_NAME + " = ? AND "
+                    + GUARD_UUID + " = ?";
+
+    static final String SELECT_TASK_DELETE_BARRIER_EXPECTED_NODES =
+            "SELECT " + NODE_ID + " FROM " + TASK_DELETE_BARRIER_EXPECTED_TABLE + " WHERE " + TASK_NAME + " = ? AND "
+                    + GUARD_UUID + " = ?";
+
+    static final String SELECT_TASK_DELETE_BARRIER_ACK_NODES =
+            "SELECT " + NODE_ID + " FROM " + TASK_DELETE_BARRIER_ACK_TABLE + " WHERE " + TASK_NAME + " = ? AND "
+                    + GUARD_UUID + " = ?";
+
+    static final String DELETE_TASK_DELETE_BARRIER_ACKS =
+            "DELETE FROM " + TASK_DELETE_BARRIER_ACK_TABLE + " WHERE " + TASK_NAME + " = ? AND " + GUARD_UUID + " = ?";
+
+    static final String DELETE_TASK_DELETE_BARRIER_EXPECTED =
+            "DELETE FROM " + TASK_DELETE_BARRIER_EXPECTED_TABLE + " WHERE " + TASK_NAME + " = ? AND " + GUARD_UUID
+                    + " = ?";
+
+    static final String DELETE_TASK_DELETE_BARRIER =
+            "DELETE FROM " + TASK_DELETE_BARRIER_TABLE + " WHERE " + TASK_NAME + " = ? AND " + GUARD_UUID + " = ?";
 
     private TaskQueryHelper() throws IllegalAccessException {
         throw new IllegalAccessException("This class not to be initialized.");

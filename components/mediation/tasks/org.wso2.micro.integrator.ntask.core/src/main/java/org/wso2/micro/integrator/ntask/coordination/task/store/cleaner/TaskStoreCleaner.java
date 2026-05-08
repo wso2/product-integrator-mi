@@ -24,12 +24,13 @@ import org.wso2.micro.integrator.coordination.ClusterCoordinator;
 import org.wso2.micro.integrator.ntask.coordination.TaskCoordinationException;
 import org.wso2.micro.integrator.ntask.coordination.task.CoordinatedTask;
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
+import org.wso2.micro.integrator.ntask.coordination.task.util.HotDeploymentWaveWaiter;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTaskManager;
 import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
+import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * The class which is responsible for cleaning the task store. This will remove the tasks if they are invalid and
@@ -38,11 +39,13 @@ import java.util.stream.Collectors;
 public class TaskStoreCleaner {
 
     private static final Log LOG = LogFactory.getLog(TaskStoreCleaner.class);
+    private static final String DELETE_PENDING_STATE = "DELETE_PENDING";
 
     private DataHolder dataHolder = DataHolder.getInstance();
     private ClusterCoordinator clusterCoordinator = dataHolder.getClusterCoordinator();
     private TaskStore taskStore;
     private ScheduledTaskManager taskManager;
+    private final boolean taskDeleteBarrierEnabled;
 
     /**
      * Constructor.
@@ -52,6 +55,7 @@ public class TaskStoreCleaner {
     public TaskStoreCleaner(ScheduledTaskManager taskManager, TaskStore taskStore) {
         this.taskManager = taskManager;
         this.taskStore = taskStore;
+        this.taskDeleteBarrierEnabled = TaskHandlingConfigUtils.isTaskDeleteBarrierEnabled();
     }
 
     /**
@@ -66,10 +70,17 @@ public class TaskStoreCleaner {
         List<String> allNodesAvailableInCluster = clusterCoordinator.getAllNodeIds();
         if (allTasks.isEmpty()) {
             LOG.debug("No tasks found in task database.");
-            return;
+            if (!taskDeleteBarrierEnabled) {
+                LOG.debug("Completed task store cleaning.");
+                return;
+            }
+        } else {
+            removeInvalidTasksFromStore(allTasks, allNodesAvailableInCluster);
+            validateDestinedNodeAndUpdateStore(allNodesAvailableInCluster);
         }
-        removeInvalidTasksFromStore(allTasks, allNodesAvailableInCluster);
-        validateDestinedNodeAndUpdateStore(allNodesAvailableInCluster);
+        if (taskDeleteBarrierEnabled) {
+            recoverExpiredOrAbandonedDeleteBarriers(allNodesAvailableInCluster);
+        }
         LOG.debug("Completed task store cleaning.");
     }
 
@@ -98,9 +109,20 @@ public class TaskStoreCleaner {
                     LOG.debug("The node [" + nodeId + "] of task [" + taskName + "] is not found in cluster"
                                       + ". Hence the node assignment will be removed.");
                 }
+                LOG.info("The node [" + nodeId + "] of task [" + taskName + "] is not found in cluster."
+                        + " Hence the node assignment will be removed.");
                 tasksToBeUpdated.add(taskName);
             }
         });
+        if (taskDeleteBarrierEnabled && !tasksToBeUpdated.isEmpty()) {
+            try {
+                HotDeploymentWaveWaiter.waitForHotDeploymentWaveToSettle(taskStore, clusterCoordinator, LOG,
+                        "invalid node unassignment");
+            } catch (TaskCoordinationException e) {
+                LOG.warn("Unable to wait for hot deployment wave settling before invalid-node unassignment. "
+                        + "Proceeding with immediate cleanup.");
+            }
+        }
         taskStore.unAssignAndUpdateState(tasksToBeUpdated);
     }
 
@@ -124,9 +146,41 @@ public class TaskStoreCleaner {
         // which has valid node ids should be in the list, if not they are invalid entries.
         tasksList.removeIf(task -> allNodesAvailableInCluster.contains(task.getDestinedNodeId()));
         tasksList.removeIf(task -> deployedCoordinatedTasks.contains(task.getTaskName()));
-        taskStore.deleteTasks(tasksList.stream().map(CoordinatedTask::getTaskName).collect(Collectors.toList()));
+        List<String> tasksToDelete = new ArrayList<>();
+        for (CoordinatedTask task : tasksList) {
+            tasksToDelete.add(task.getTaskName());
+        }
+        List<String> skippedTasks = taskStore.deleteTasksIfStateNotMatch(tasksToDelete, DELETE_PENDING_STATE);
+        for (String skippedTask : skippedTasks) {
+            LOG.info("Skipping invalid task cleanup for task [" + skippedTask + "] because it is in ["
+                    + DELETE_PENDING_STATE + "] state.");
+        }
         if (LOG.isDebugEnabled()) {
-            tasksList.forEach(removedTask -> LOG.debug("Removed invalid task :" + removedTask));
+            tasksToDelete.forEach(removedTask -> LOG.debug("Removed invalid task :" + removedTask));
+        }
+    }
+
+    /**
+     * Recovers delete barriers owned by dead nodes or expired by deadline.
+     *
+     * @param allNodesAvailableInCluster currently live nodes
+     * @throws TaskCoordinationException when recovery query execution fails
+     */
+    private void recoverExpiredOrAbandonedDeleteBarriers(List<String> allNodesAvailableInCluster)
+            throws TaskCoordinationException {
+        List<String> recoveredTaskNames = taskStore.recoverExpiredOrAbandonedDeleteBarriers(allNodesAvailableInCluster,
+                System.currentTimeMillis());
+        if (recoveredTaskNames.isEmpty()) {
+            return;
+        }
+        List<String> deployedCoordinatedTasks = taskManager.getAllCoordinatedTasksDeployed();
+        for (String taskName : recoveredTaskNames) {
+            if (!deployedCoordinatedTasks.contains(taskName)) {
+                continue;
+            }
+            taskStore.addTaskIfNotExist(taskName);
+            LOG.info("Recovery flow reinitialized coordinated task row for task [" + taskName
+                    + "] after delete barrier recovery.");
         }
     }
 

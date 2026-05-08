@@ -21,6 +21,7 @@ package org.wso2.micro.integrator.management.apis;
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.commons.configuration2.PropertiesConfigurationLayout;
 import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.logging.log4j.Level;
@@ -135,17 +136,18 @@ public class LoggingResource extends APIResource {
         } else if (httpMethod.equals(Constants.HTTP_DELETE)) {
             String userName = (String) messageContext.getProperty(USERNAME_PROPERTY);
             String loggerName = Utils.getQueryParameter(messageContext, Constants.LOGGER_NAME);
+            loggerName = loggerName == null ? null : loggerName.trim();
             try {
-                if (SecurityUtils.canUserEdit(messageContext, userName)) {
-                    if (!StringUtils.isEmpty(loggerName)) {
+                if (SecurityUtils.canUserEdit(userName)) {
+                    if (StringUtils.isNotEmpty(loggerName)) {
                         if (Constants.ROOT_LOGGER.equals(loggerName)) {
                             this.jsonBody = this.createJsonError("Root logger cannot be deleted", "",
-                                    axis2MessageContext);
+                                    Constants.FORBIDDEN, axis2MessageContext);
                         } else {
                             try {
                                 String performedBy = Constants.ANONYMOUS_USER;
-                                if (messageContext.getProperty(Constants.USERNAME_PROPERTY) != null) {
-                                    performedBy = messageContext.getProperty(Constants.USERNAME_PROPERTY).toString();
+                                if (userName != null) {
+                                    performedBy = userName;
                                 }
 
                                 if (this.isLoggerExist(loggerName)) {
@@ -155,8 +157,8 @@ public class LoggingResource extends APIResource {
                                             + loggerName + "') not found", "", axis2MessageContext);
                                 }
                             } catch (IOException exception) {
-                                this.jsonBody = this.createJsonError("Exception while getting logger data ",
-                                        exception, axis2MessageContext);
+                                this.jsonBody = this.createJsonError("Exception while deleting logger "
+                                                + "configuration ", exception, axis2MessageContext);
                             }
                         }
                     } else {
@@ -164,8 +166,7 @@ public class LoggingResource extends APIResource {
                                 axis2MessageContext);
                     }
                 } else {
-                    Utils.sendForbiddenFaultResponse(axis2MessageContext);
-                    jsonBody = createJsonError("User is not Authorized to delete log configs", "",
+                    jsonBody = createJsonError("User is not authorized to delete logger configurations", "",
                             Constants.FORBIDDEN, axis2MessageContext);
                 }
             } catch (UserStoreException e) {
@@ -222,8 +223,8 @@ public class LoggingResource extends APIResource {
                         jsonBody = createJsonError("Log level is missing", "", axis2MessageContext);
                     }
                 } else {
-                    Utils.sendForbiddenFaultResponse(axis2MessageContext);
-                    jsonBody = createJsonError("User is not Authorized to edit", "", axis2MessageContext);
+                    jsonBody = createJsonError("User is not Authorized to edit", "",
+                            Constants.FORBIDDEN, axis2MessageContext);
                 }
             } catch (UserStoreException e) {
                 log.error("Error occurred while retrieving the user data", e);
@@ -234,7 +235,8 @@ public class LoggingResource extends APIResource {
         return true;
     }
 
-    private JSONObject deleteLoggerData(String userName, org.apache.axis2.context.MessageContext axis2MessageContext, String loggerName) {
+    private JSONObject deleteLoggerData(String userName, org.apache.axis2.context.MessageContext axis2MessageContext,
+                                        String loggerName) {
         try {
             this.loadConfigs();
 
@@ -247,8 +249,8 @@ public class LoggingResource extends APIResource {
 
             String currentLoggers = (String) this.config.getProperty(LOGGERS_PROPERTY);
             if (currentLoggers != null) {
-                StringBuilder formatted = getFormattedLoggersString(loggerName, currentLoggers);
-                this.config.setProperty(LOGGERS_PROPERTY, formatted.toString());
+                String formatted = getFormattedLoggersString(loggerName, currentLoggers);
+                this.config.setProperty(LOGGERS_PROPERTY, formatted);
             }
 
             // 4. Persist and Audit
@@ -257,7 +259,7 @@ public class LoggingResource extends APIResource {
 
             JSONObject info = new JSONObject();
             info.put(Constants.LOGGER_NAME, loggerName);
-            AuditLogger.logAuditMessage(userName, Constants.AUDIT_LOG_ACTION_DELETED, info);
+            AuditLogger.logAuditMessage(userName, "", Constants.AUDIT_LOG_ACTION_DELETED, info);
 
         } catch (IOException | ConfigurationException exception) {
             this.jsonBody = this.createJsonError("Exception while deleting logger data ", exception, axis2MessageContext);
@@ -266,7 +268,7 @@ public class LoggingResource extends APIResource {
         return this.jsonBody;
     }
 
-    private static StringBuilder getFormattedLoggersString(String loggerName, String currentLoggers) {
+    private static String getFormattedLoggersString(String loggerName, String currentLoggers) {
 
         // 1. Split into a List, trimming and ignoring empty spaces/backslashes
         // This regex [\\s,\\\\]+ breaks it down by commas, spaces, or backslashes
@@ -274,12 +276,14 @@ public class LoggingResource extends APIResource {
                 Arrays.asList(currentLoggers.split("[\\s,\\\\]+"))
         );
 
-        // 2. Remove the specific logger (Case-Insensitive)
+        String normalizedLoggerName = loggerName == null ? null : loggerName.trim();
+
+        // 2. Remove the specific logger (Case-sensitive)
         // iterator.remove() is the safe way to remove while looping
         Iterator<String> iterator = loggerList.iterator();
         while (iterator.hasNext()) {
             String name = iterator.next().trim();
-            if (name.isEmpty() || name.equalsIgnoreCase(loggerName)) {
+            if (name.isEmpty() || (name.equals(normalizedLoggerName))) {
                 iterator.remove();
             }
         }
@@ -297,7 +301,7 @@ public class LoggingResource extends APIResource {
 
             formatted.append(logger);
         }
-        return formatted;
+        return formatted.toString();
     }
 
     private List<String> getLogConfigEntriesToDelete(String loggerName) {
@@ -486,7 +490,11 @@ public class LoggingResource extends APIResource {
 
     private JSONObject createJsonError(String message, Object exception, String statusCode,
                                        org.apache.axis2.context.MessageContext axis2MessageContext) {
-        log.error(message + exception);
+        if (exception instanceof Throwable) {
+            log.error(message, (Throwable) exception);
+        } else {
+            log.error(message + exception);
+        }
         JSONObject jsonBody = Utils.createJsonErrorObject(message);
         axis2MessageContext.setProperty(Constants.HTTP_STATUS_CODE, statusCode);
         return jsonBody;

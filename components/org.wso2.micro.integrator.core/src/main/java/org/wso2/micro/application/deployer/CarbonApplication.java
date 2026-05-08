@@ -33,6 +33,8 @@ public class CarbonApplication {
     private boolean deploymentCompleted;
     private String mainSequence;
     private ClassLoader classLoader;
+    private String errorMessage;
+    private String faultStackTrace;
 
     private ApplicationConfiguration appConfig;
 
@@ -112,6 +114,22 @@ public class CarbonApplication {
 
     public void setMainSequence(String mainSequence) {
         this.mainSequence = mainSequence;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
+    }
+
+    public String getFaultStackTrace() {
+        return faultStackTrace;
+    }
+
+    public void setFaultStackTrace(String faultStackTrace) {
+        this.faultStackTrace = faultStackTrace;
     }
 
 }

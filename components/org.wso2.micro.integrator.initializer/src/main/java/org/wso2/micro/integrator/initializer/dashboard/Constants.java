@@ -69,4 +69,11 @@ public class Constants {
 
     public static final String ENDPOINT_TEMPLATE_TYPE = "endpoint";
     public static final String SEQUENCE_TEMPLATE_TYPE = "sequence";
+
+    // JSON Response Field Names
+    public static final String JSON_FIELD_BODY = "body";
+    public static final String JSON_FIELD_MESSAGE = "message";
+
+    // Heartbeat Payload Field Names
+    public static final String FIELD_RUNTIME_HASH = "runtimeHash";
 }

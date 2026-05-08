@@ -56,6 +56,8 @@ import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -332,6 +334,10 @@ public class CappDeployer extends AbstractDeployer {
         undeployCarbonApp(currentApp, axisConfig);
         // Validate synapse config to remove half added swagger definitions in the case of a faulty CAPP.
         SynapseConfigUtils.getSynapseConfiguration(SUPER_TENANT_DOMAIN_NAME).validateSwaggerTable();
+        currentApp.setErrorMessage(e.getMessage());
+        StringWriter sw = new StringWriter();
+        e.printStackTrace(new PrintWriter(sw));
+        currentApp.setFaultStackTrace(sw.toString());
         faultyCAppObjects.add(currentApp);
         faultyCapps.add(cAppName);
     }

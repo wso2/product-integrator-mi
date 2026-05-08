@@ -1477,6 +1477,59 @@ paths:
                     example: Successfully added logger for ('org-apache-hadoop-hive') with level DEBUG
       security:
         - BearerAuth: []
+    delete:
+      summary: Delete Logger
+      description: |
+        Deletes a specific logger configuration by providing the logger name as a query parameter.
+        The root logger cannot be deleted.
+
+        Example:
+        ```
+        DELETE /management/logging?loggerName=org-apache-coyote
+        ```
+      tags:
+        - Logging
+      parameters:
+        - in: query
+          name: loggerName
+          schema:
+            type: string
+            example: org-apache-coyote
+          required: true
+          description: The name of the logger to delete.
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Successfully deleted logger for ('org-apache-coyote')
+        '400':
+          description: Bad request - Logger name is missing or logger not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Error:
+                    type: string
+                    example: Specified logger name ('org-apache-coyote') not found
+        '403':
+          description: Forbidden - User is not authorized or attempting to delete root logger
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Error:
+                    type: string
+                    example: Root logger cannot be deleted
+      security:
+        - BearerAuth: []
   /configs:
     get:
       summary: Get Correlation Logging Configuration Status

@@ -29,9 +29,11 @@ import org.wso2.micro.integrator.ntask.coordination.TaskCoordinationException;
 import org.wso2.micro.integrator.ntask.coordination.task.resolver.TaskLocationResolver;
 import org.wso2.micro.integrator.ntask.coordination.task.scehduler.CoordinatedTaskScheduler;
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
+import org.wso2.micro.integrator.ntask.coordination.task.util.HotDeploymentWaveWaiter;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTaskManager;
 import org.wso2.micro.integrator.ntask.core.internal.CoordinatedTaskScheduleManager;
 import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
+import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
 
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
@@ -48,6 +50,7 @@ public class TaskEventListener extends MemberEventListener {
     private TaskStore taskStore;
     private TaskLocationResolver locationResolver;
     private ScheduledTaskManager taskManager;
+    private final boolean taskDeleteBarrierEnabled;
 
     public TaskEventListener(ScheduledTaskManager taskManager, TaskStore taskStore,
                              TaskLocationResolver locationResolver) {
@@ -55,6 +58,7 @@ public class TaskEventListener extends MemberEventListener {
         this.taskManager = taskManager;
         this.taskStore = taskStore;
         this.locationResolver = locationResolver;
+        this.taskDeleteBarrierEnabled = TaskHandlingConfigUtils.isTaskDeleteBarrierEnabled();
     }
 
     @Override
@@ -85,6 +89,15 @@ public class TaskEventListener extends MemberEventListener {
             LOG.debug("Member removed : " + nodeDetail.getNodeId());
         }
         String nodeId = nodeDetail.getNodeId();
+        if (taskDeleteBarrierEnabled) {
+            try {
+                HotDeploymentWaveWaiter.waitForHotDeploymentWaveToSettle(taskStore, clusterCoordinator, LOG,
+                        "removed node [" + nodeId + "] task unassignment");
+            } catch (TaskCoordinationException e) {
+                LOG.warn("Unable to wait for hot deployment wave settling before member removed cleanup for node ["
+                        + nodeId + "]. Proceeding with immediate cleanup.");
+            }
+        }
         try {
             taskStore.unAssignAndUpdateState(nodeId);
         } catch (TaskCoordinationException e) {
@@ -154,4 +167,5 @@ public class TaskEventListener extends MemberEventListener {
     public void messageProcessorStateChanged(String messageProcessorName, String state) {
         taskManager.updateMessageProcessorStateInRegistry(messageProcessorName, state);
     }
+
 }

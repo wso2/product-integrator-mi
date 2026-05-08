@@ -69,7 +69,6 @@ import javax.mail.util.ByteArrayDataSource;
 import javax.xml.namespace.QName;
 
 import static org.wso2.micro.integrator.management.apis.Constants.BAD_REQUEST;
-import static org.wso2.micro.integrator.management.apis.Constants.LIST;
 import static org.wso2.micro.integrator.management.apis.Constants.NOT_FOUND;
 import static org.wso2.micro.integrator.management.apis.Constants.SEARCH_KEY;
 import static org.wso2.micro.integrator.management.apis.Constants.USERNAME_PROPERTY;
@@ -80,11 +79,14 @@ public class CarbonAppResource extends APIResource {
     private static final String MULTIPART_FORMDATA_DATA_TYPE = "multipart/form-data";
     private static final String CAPP_NAME = "name";
     private static final String CAPP_FILE_NAME = "cAppFileName";
+    private static final String FAULT_PATH_SUFFIX = "/fault";
     // HTTP method types supported by the resource
+    private final String urlTemplate;
     private Set<String> methods;
 
     public CarbonAppResource(String urlTemplate){
         super(urlTemplate);
+        this.urlTemplate = urlTemplate;
         methods = new HashSet<>();
         methods.add(Constants.HTTP_GET);
         methods.add(Constants.HTTP_POST);
@@ -116,9 +118,14 @@ public class CarbonAppResource extends APIResource {
         String userName = (String) messageContext.getProperty(USERNAME_PROPERTY);
         switch (httpMethod) {
             case Constants.HTTP_GET: {
+                String cappName = Utils.getPathParameter(messageContext, CAPP_NAME);
+                log.debug("Processing GET request for carbon application. Path parameter: " + cappName);
                 String param = Utils.getQueryParameter(messageContext, "carbonAppName");
                 String searchKey = Utils.getQueryParameter(messageContext, SEARCH_KEY);
-                if (Objects.nonNull(param)) {
+                if (Objects.nonNull(cappName)
+                        && urlTemplate.endsWith(FAULT_PATH_SUFFIX)) {
+                    populateFaultyCarbonAppData(messageContext, cappName);
+                } else if (Objects.nonNull(param)) {
                     String acceptHeader = (String) SecurityUtils.getHeaders(axis2MessageContext)
                                                                 .get(HTTPConstants.HEADER_ACCEPT);
                     if (Constants.MEDIA_TYPE_APPLICATION_OCTET_STREAM.equals(acceptHeader)) {
@@ -200,6 +207,9 @@ public class CarbonAppResource extends APIResource {
             }
             for (CarbonApplication faultyApp : faultyAppList) {
                 JSONObject appObject = convertCarbonAppToJsonObject(faultyApp);
+                if (faultyApp.getErrorMessage() != null) {
+                    appObject.put("errorMessage", faultyApp.getErrorMessage());
+                }
                 jsonBody.getJSONArray(Constants.FAULTY_LIST).put(appObject);
             }
         }
@@ -378,6 +388,33 @@ public class CarbonAppResource extends APIResource {
                     CAPP_NAME + " parameter in the path", axisMsgCtx, BAD_REQUEST);
             Utils.setJsonPayLoad(axisMsgCtx, jsonResponse);
         }
+    }
+
+    private void populateFaultyCarbonAppData(MessageContext messageContext, String cappName) {
+
+        org.apache.axis2.context.MessageContext axis2MessageContext =
+                ((Axis2MessageContext) messageContext).getAxis2MessageContext();
+
+        CarbonApplication faultyApp = CappDeployer.getFaultyCAppObjects().stream()
+                .filter(app -> cappName.equals(app.getAppName()))
+                .findFirst().orElse(null);
+
+        if (Objects.isNull(faultyApp)) {
+            Utils.setJsonPayLoad(axis2MessageContext,
+                    Utils.createJsonError("Faulty carbon application not found for the given name.",
+                            axis2MessageContext, NOT_FOUND));
+            return;
+        }
+
+        String errorMessage = faultyApp.getErrorMessage() != null ? faultyApp.getErrorMessage() : "";
+        String stackTrace = faultyApp.getFaultStackTrace() != null ? faultyApp.getFaultStackTrace() : "";
+
+        JSONObject jsonBody = new JSONObject();
+        jsonBody.put(Constants.NAME, faultyApp.getAppName());
+        jsonBody.put(Constants.VERSION, faultyApp.getAppVersion());
+        jsonBody.put("errorMessage", errorMessage);
+        jsonBody.put("faultStackTrace", stackTrace);
+        Utils.setJsonPayLoad(axis2MessageContext, jsonBody);
     }
 
     private void populateCarbonAppList(MessageContext messageContext) {
