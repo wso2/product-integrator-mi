@@ -34,19 +34,24 @@ import org.wso2.esb.integration.common.utils.common.ServerConfigurationManager;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 
 public class ApiWithConfigurablePropertyTestCase extends ESBIntegrationTest {
 
     private ServerConfigurationManager serverConfigurationManager;
+    private CarbonLogReader carbonLogReader;
 
     @BeforeClass(alwaysRun = true)
     public void init() throws Exception {
         super.init();
-        CarbonLogReader carbonLogReader = new CarbonLogReader();
+        carbonLogReader = new CarbonLogReader();
         carbonLogReader.start();
         serverConfigurationManager = new ServerConfigurationManager(context);
         File capp = new File(getESBResourceLocation() + File.separator + "config.var" + File.separator +
@@ -110,6 +115,75 @@ public class ApiWithConfigurablePropertyTestCase extends ESBIntegrationTest {
         Assert.assertEquals(StringUtils.normalizeSpace(httpResponse.getData()),
                 StringUtils.normalizeSpace("{ \"name\": \"env\", \"msg\": \"Hello\" }"),
                 StringUtils.normalizeSpace(httpResponse.getData()));
+    }
+
+    @Test(groups = {"wso2.esb"},
+            description = "Regression for product-integrator-mi#4234: the launcher's export_env_file() loop "
+                    + "must export the last KEY=VALUE line of an --env-file even when the file lacks a "
+                    + "trailing newline.",
+            priority = 5)
+    public void testConfigurablePropertyWithEnvVariableNoTrailingNewline()
+            throws IOException, AutomationUtilException, InterruptedException {
+        // Build a .env file whose LAST line is `name=env` and which has NO trailing newline.
+        // Pre-fix, the POSIX `read` loop in micro-integrator.sh would silently drop this last line,
+        // leaving `name` undefined in the JVM environment and producing a "{name: , msg: Hello}"-style
+        // response (and a `ConfigDeployer ... is not found` error in the log).
+        Path envFile = Files.createTempFile("issue-4234-no-newline-", ".env");
+        envFile.toFile().deleteOnExit();
+        String contents = "msg=Hello\nname=env"; // no trailing '\n' — bug's trigger condition
+        Files.write(envFile, contents.getBytes(StandardCharsets.UTF_8));
+
+        carbonLogReader.clearLogs();
+        Map<String, String> commands = new HashMap<>();
+        commands.put("--env-file", envFile.toAbsolutePath().toString());
+        serverConfigurationManager.restartMicroIntegrator(commands);
+
+        Map<String, String> headers = new HashMap<>();
+        URL endpoint = new URL(getApiInvocationURL("apiConfig/test_api"));
+        HttpResponse httpResponse = HttpRequestUtil.doGet(endpoint.toString(), headers);
+        Assert.assertEquals(httpResponse.getResponseCode(), 200);
+        Assert.assertEquals(StringUtils.normalizeSpace(httpResponse.getData()),
+                StringUtils.normalizeSpace("{ \"name\": \"env\", \"msg\": \"Hello\" }"),
+                StringUtils.normalizeSpace(httpResponse.getData()));
+
+        // The deployer logs `The value of the key:[<key>] is not found.` for any configurable
+        // property that the launcher failed to export. With the fix, neither `name` nor `msg`
+        // should hit that branch.
+        assertFalse(carbonLogReader.assertIfLogExists("The value of the key:[name] is not found."),
+                "ConfigDeployer logged a missing-key error for `name`; the launcher dropped the last "
+                        + "line of the no-trailing-newline .env file. See product-integrator-mi#4234.");
+        assertFalse(carbonLogReader.assertIfLogExists("The value of the key:[msg] is not found."),
+                "ConfigDeployer logged a missing-key error for `msg`.");
+    }
+
+    @Test(groups = {"wso2.esb"},
+            description = "Regression for product-integrator-mi#4234: a single-line --env-file with no "
+                    + "trailing newline must still be exported in full.",
+            priority = 6)
+    public void testConfigurablePropertyWithSingleLineEnvFileNoTrailingNewline()
+            throws IOException, AutomationUtilException, InterruptedException {
+        // Edge case from the IA: a 1-line env file with no terminator. The base API needs both
+        // `name` and `msg` resolved, so the unsupplied one falls back to a system property here.
+        Path envFile = Files.createTempFile("issue-4234-single-line-", ".env");
+        envFile.toFile().deleteOnExit();
+        Files.write(envFile, "name=env".getBytes(StandardCharsets.UTF_8)); // single line, no '\n'
+
+        carbonLogReader.clearLogs();
+        Map<String, String> commands = new HashMap<>();
+        commands.put("--env-file", envFile.toAbsolutePath().toString());
+        commands.put("-Dmsg", "Hello");
+        serverConfigurationManager.restartMicroIntegrator(commands);
+
+        Map<String, String> headers = new HashMap<>();
+        URL endpoint = new URL(getApiInvocationURL("apiConfig/test_api"));
+        HttpResponse httpResponse = HttpRequestUtil.doGet(endpoint.toString(), headers);
+        Assert.assertEquals(httpResponse.getResponseCode(), 200);
+        Assert.assertEquals(StringUtils.normalizeSpace(httpResponse.getData()),
+                StringUtils.normalizeSpace("{ \"name\": \"env\", \"msg\": \"Hello\" }"),
+                StringUtils.normalizeSpace(httpResponse.getData()));
+        assertFalse(carbonLogReader.assertIfLogExists("The value of the key:[name] is not found."),
+                "ConfigDeployer logged a missing-key error for `name`; the launcher dropped the only "
+                        + "line of a single-line, unterminated .env file. See product-integrator-mi#4234.");
     }
 
     @AfterClass(alwaysRun = true)

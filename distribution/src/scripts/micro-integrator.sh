@@ -130,7 +130,7 @@ export_env_file() {
   fi
 
   # Read the .env file and export each variable to the environment
-  while IFS='=' read -r key value; do
+  while IFS='=' read -r key value || [ -n "$key" ]; do
       # Ignore lines starting with '#' (comments) or empty lines
       case "$key" in
           \#*|"")
