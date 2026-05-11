@@ -24,6 +24,7 @@ import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.inbound.InboundRequestProcessor;
 import org.apache.synapse.inbound.InboundTaskProcessor;
 import org.apache.synapse.startup.quartz.StartUpController;
+import org.apache.synapse.task.TaskConstants;
 import org.apache.synapse.task.TaskDescription;
 import org.apache.synapse.task.TaskManager;
 import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericOneTimeTask;
@@ -71,6 +72,7 @@ public abstract class InboundOneTimeTriggerRequestProcessor implements InboundRe
             taskDescription.setIntervalInMs(true);
             taskDescription.addResource(TaskDescription.INSTANCE, task);
             taskDescription.addResource(TaskDescription.CLASSNAME, task.getClass().getName());
+            taskDescription.addProperty(TaskConstants.SKIP_START_IN_PAUSED_MODE_ASSIGNMENT, "true");
             startUpController = new StartUpController();
             startUpController.setTaskDescription(taskDescription);
             startUpController.init(synapseEnvironment);
