@@ -22,6 +22,7 @@ import org.apache.axiom.om.OMException;
 import org.apache.axiom.om.impl.builder.StAXOMBuilder;
 import org.apache.axis2.context.ConfigurationContext;
 import org.apache.axis2.deployment.AbstractDeployer;
+import org.apache.axis2.deployment.Deployer;
 import org.apache.axis2.deployment.DeploymentException;
 import org.apache.axis2.deployment.repository.util.DeploymentFileData;
 import org.apache.axis2.engine.AxisConfiguration;
@@ -36,6 +37,7 @@ import org.apache.synapse.config.SynapseConfiguration;
 import org.apache.synapse.api.API;
 import org.apache.synapse.config.SynapsePropertiesLoader;
 import org.wso2.carbon.securevault.SecretCallbackHandlerService;
+import org.wso2.config.mapper.ConfigParser;
 import org.wso2.micro.application.deployer.AppDeployerUtils;
 import org.wso2.micro.application.deployer.CarbonApplication;
 import org.wso2.micro.application.deployer.config.ApplicationConfiguration;
@@ -65,20 +67,32 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
+import javax.xml.namespace.QName;
+import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 
 import static org.wso2.micro.core.Constants.SUPER_TENANT_DOMAIN_NAME;
 import static org.wso2.micro.integrator.initializer.deployment.synapse.deployer.SynapseAppDeployerConstants.API_TYPE;
+import static org.wso2.micro.integrator.initializer.deployment.synapse.deployer.SynapseAppDeployerConstants.MEDIATOR_TYPE;
+import static org.wso2.micro.integrator.initializer.deployment.synapse.deployer.SynapseAppDeployerConstants.REGISTRY_RESOURCE_TYPE;
+import static org.wso2.micro.integrator.initializer.deployment.synapse.deployer.SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE;
 import static org.wso2.micro.integrator.initializer.utils.Constants.CAPP_FOLDER_NAME;
 import static org.wso2.micro.integrator.initializer.utils.Constants.CAR_FILE_EXTENSION;
+import static org.wso2.micro.integrator.initializer.utils.Constants.HTTP_CONNECTOR_NAME;
 import static org.wso2.micro.integrator.initializer.utils.DeployerUtil.getCAppsWithDescriptorCount;
 import static org.wso2.micro.integrator.initializer.utils.DeployerUtil.getCAppProcessingOrder;
 import static org.wso2.micro.integrator.registry.MicroIntegratorRegistryConstants.REG_DEP_FAILURE_IDENTIFIER;
@@ -94,9 +108,72 @@ public class CappDeployer extends AbstractDeployer {
     private static ArrayList<CarbonApplication> faultyCAppObjects = new ArrayList<>();
     private static ArrayList<String> faultyCapps = new ArrayList<>();
     private final Object lock = new Object();
+
+    private static final String ERROR_MESSAGE = "errorMessage";
     private static final String SWAGGER_SUBSTRING = "_swagger";
     private static final String METADATA_FOLDER_NAME = "metadata";
     private static final String ARTIFACT_FILE = "artifact.xml";
+
+    /**
+     * Counts the number of retry passes executed so far this startup cycle.
+     * Compared against {@link #getMaxRetryCount()} to bound the total number of retries.
+     * Reset in {@link #cleanup()} so that unit tests that re-use the same JVM get a clean state.
+     */
+    private static volatile int retryPassCount = 0;
+
+    /**
+     * True while {@link #retryFaultyCApps()} is executing. Guards the retry trigger in
+     * {@link #deployCarbonApps(String)} so that the recursive {@code deployCarbonApps} calls
+     * made during retries do not re-enter the retry logic; the explicit loop inside
+     * {@code retryFaultyCApps} drives all subsequent passes instead.
+     */
+    private static volatile boolean isRetrying = false;
+
+    /**
+     * Number of high-priority CApps discovered during {@link #sort}. Used to detect when
+     * the high-priority deployment phase is complete so faulty ones can be retried before
+     * any low-priority CApp is deployed. -1 means sort() has not run yet (e.g. priority
+     * deployment is disabled or hot-deploy path).
+     */
+    private static volatile int highPriorityCAppCount = -1;
+
+    private static final Set<String> HIGH_PRIORITY_TYPES = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList(MEDIATOR_TYPE, SYNAPSE_LIBRARY_TYPE, REGISTRY_RESOURCE_TYPE)));
+
+    private static final XMLInputFactory SECURE_XML_INPUT_FACTORY = createSecureXMLInputFactory();
+
+    private static XMLInputFactory createSecureXMLInputFactory() {
+        XMLInputFactory factory = XMLInputFactory.newInstance();
+        setXMLInputFactoryProperty(factory, XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
+        setXMLInputFactoryProperty(factory, XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
+        return factory;
+    }
+
+    private static void setXMLInputFactoryProperty(XMLInputFactory factory, String property, Object value) {
+        try {
+            factory.setProperty(property, value);
+        } catch (IllegalArgumentException e) {
+            if (log.isDebugEnabled()) {
+                log.debug("XMLInputFactory implementation does not support property '" + property + "'.", e);
+            }
+        }
+    }
+
+    /**
+     * {@code [server]} section key in deployment.toml that enables priority-based CApp sorting
+     * and faulty-CApp retry. When absent or false the deployer falls back to the default
+     * alphabetical ordering and skips the retry pass.
+     */
+    private static final String PRIORITY_DEPLOYMENT_CONFIG_KEY = "server.enable_priority_deployment";
+
+    /**
+     * {@code [server]} section key in deployment.toml that controls how many retry passes are
+     * performed after the high-priority phase. Defaults to {@code 1} when absent or invalid.
+     * Set to {@code 0} to disable retries entirely.
+     */
+    private static final String PRIORITY_DEPLOYMENT_RETRY_COUNT_CONFIG_KEY =
+            "server.priority_deployment_retry_count";
+
     /**
      * Carbon application repository directory.
      */
@@ -211,7 +288,7 @@ public class CappDeployer extends AbstractDeployer {
             targetCAppPath = cAppDirectory + File.separator + parentCApp + File.separator + "dependencies" + File.separator + cAppName;
         }
         String extractedPath = extractCarbonApplication(targetCAppPath);
-        deployCarbonApplications(cAppName, targetCAppPath, extractedPath);
+        deployCarbonApplications(cAppName, targetCAppPath, extractedPath, isEmbeddedCAR);
     }
 
     public static String extractParentCAppName(String filePath) {
@@ -233,10 +310,10 @@ public class CappDeployer extends AbstractDeployer {
         String archPathToProcess = AppDeployerUtils.formatPath(artifactPath);
         String cAppName = archPathToProcess.substring(archPathToProcess.lastIndexOf('/') + 1);
         String targetCAppPath = artifactPath.endsWith(File.separator) ? artifactPath : artifactPath + File.separator;
-        deployCarbonApplications(cAppName, targetCAppPath, targetCAppPath);
+        deployCarbonApplications(cAppName, targetCAppPath, targetCAppPath, false);
     }
 
-    private void deployCarbonApplications(String cAppName, String cAppPath, String targetCAppPath) throws CarbonException {
+    private void deployCarbonApplications(String cAppName, String cAppPath, String targetCAppPath, boolean isEmbeddedCAR) throws CarbonException {
 
         CarbonApplication currentApp = null;
         try {
@@ -269,17 +346,44 @@ public class CappDeployer extends AbstractDeployer {
                         AppDeployerUtils.getTenantIdLogString(AppDeployerUtils.getTenantId()));
             }
         } catch (DeploymentException e) {
-            handleDeployException(e, cAppName, currentApp);
+            handleDeployException(e, cAppName, currentApp, isEmbeddedCAR);
         } catch (SynapseException e) {
             // Handel SynapseException thrown by MicroIntegratorRegistry
             if (e.getMessage() != null && e.getMessage().startsWith(REG_DEP_FAILURE_IDENTIFIER)){
-                handleDeployException(e, cAppName, currentApp);
+                handleDeployException(e, cAppName, currentApp, isEmbeddedCAR);
             }
             throw e;
+        } finally {
+            // Skip priority-deployment retry logic entirely when the feature is disabled.
+            if (isCAppPriorityDeploymentEnabled()) {
+                // Once every high-priority CApp has been processed (either successfully or as
+                // faulty), retry the failed ones before any low-priority CApp is deployed.
+                // This gives high-priority CApps (connectors, class mediators, registry
+                // resources) another chance while low-priority CApps can still depend on them.
+                // Using finally ensures this fires on all paths: success, DeploymentException
+                // (which is consumed by the catch), and SynapseException (which re-throws).
+                // The == rather than >= condition fires exactly once: on the last high-priority
+                // CApp of the initial deployment pass. isRetrying suppresses re-entry from the
+                // deployCarbonApps calls made inside retryFaultyCApps(); that method drives all
+                // subsequent passes via an explicit loop.
+                boolean isHighPriorityPhaseComplete = highPriorityCAppCount > 0
+                        && (cAppMap.size() + faultyCapps.size()) == highPriorityCAppCount;
+                if (isHighPriorityPhaseComplete && !isRetrying && !faultyCapps.isEmpty()
+                        && ServiceCatalogUtils.isServerInStartupMode()) {
+                    isRetrying = true;
+                    try {
+                        retryFaultyCApps();
+                    } finally {
+                        isRetrying = false;
+                    }
+                }
+            }
         }
 
-        // Initial execution of Service catalog Deployer at server startup when last CApp get deployed
         boolean isAllCAppsDeployed = getCAppFileList().length == cAppMap.size() + faultyCapps.size();
+
+        // Initial execution of Service catalog Deployer at server startup when last CApp get deployed.
+        // isServiceCatalogStartupExecutionPending guards against multiple submissions.
         if (isServiceCatalogStartupExecutionPending && serviceCatalogConfiguration != null && isAllCAppsDeployed) {
             ServiceCatalogDeployer serviceDeployer = new ServiceCatalogDeployer(null,
                     ((CarbonAxisConfigurator) axisConfig.getAxisConfiguration().getConfigurator()).getRepoLocation(),
@@ -317,6 +421,66 @@ public class CappDeployer extends AbstractDeployer {
     }
 
     /**
+     * Returns true when the {@code server.enable_priority_deployment} key in
+     * deployment.toml is present and set to {@code true}. Defaults to false when absent.
+     */
+    private boolean isCAppPriorityDeploymentEnabled() {
+        Object value = ConfigParser.getParsedConfigs().get(PRIORITY_DEPLOYMENT_CONFIG_KEY);
+        return value != null && Boolean.parseBoolean(value.toString());
+    }
+
+    /**
+     * Returns the maximum number of retry passes to perform after the high-priority phase.
+     * Read from {@code server.priority_deployment_retry_count} in deployment.toml.
+     * Defaults to {@code 1} when the key is absent or the value is not a valid integer.
+     * Negative values are treated as {@code 0} (no retries).
+     */
+    private int getMaxRetryCount() {
+        Object value = ConfigParser.getParsedConfigs().get(PRIORITY_DEPLOYMENT_RETRY_COUNT_CONFIG_KEY);
+        if (value == null) {
+            return 1;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value.toString()));
+        } catch (NumberFormatException e) {
+            log.warn("Invalid value for '" + PRIORITY_DEPLOYMENT_RETRY_COUNT_CONFIG_KEY + "': " + value
+                    + ". Using default retry count of 1.");
+            return 1;
+        }
+    }
+
+    /**
+     * Retries deployment of all CApps that failed during the high-priority phase.
+     * Executes up to {@link #getMaxRetryCount()} passes; exits early when no faults remain.
+     * Faulty CApp lists are snapshotted and cleared before each pass so each CApp gets
+     * a clean attempt — on success it lands in {@code cAppMap}, on failure it is
+     * re-added to the faulty lists and considered in the next pass.
+     */
+    private void retryFaultyCApps() {
+        final int maxRetryCount = getMaxRetryCount();
+        while (retryPassCount < maxRetryCount && !faultyCapps.isEmpty()) {
+            retryPassCount++;
+            List<CarbonApplication> appsToRetry = new ArrayList<>(faultyCAppObjects);
+            List<String> toRetry = new ArrayList<>(faultyCapps);
+            faultyCAppObjects.clear();
+            faultyCapps.clear();
+            log.info("Retry pass " + retryPassCount + " of " + maxRetryCount
+                    + ": Retrying deployment of " + toRetry.size() + " failed CApp(s): " + toRetry);
+            for (int i = 0; i < toRetry.size(); i++) {
+                CarbonApplication faultyApp = i < appsToRetry.size() ? appsToRetry.get(i) : null;
+                String artifactPath = faultyApp != null ? faultyApp.getAppFilePath()
+                        : cAppDir + File.separator + toRetry.get(i);
+                boolean isEmbedded = faultyApp != null && faultyApp.isEmbeddedCAR();
+                try {
+                    deployCarbonApps(artifactPath, isEmbedded);
+                } catch (Exception e) {
+                    log.error("Error while retrying deployment of carbon application: " + artifactPath, e);
+                }
+            }
+        }
+    }
+
+    /**
      * Extracts the carbon application to the tmp/carbonapps directory.
      *
      * @param targetCAppPath - path of the carbon application
@@ -328,7 +492,7 @@ public class CappDeployer extends AbstractDeployer {
         return AppDeployerUtils.extractCarbonApp(targetCAppPath);
     }
 
-    private void handleDeployException(Exception e, String cAppName, CarbonApplication currentApp) {
+    private void handleDeployException(Exception e, String cAppName, CarbonApplication currentApp, boolean isEmbeddedCAR) {
         log.error("Error occurred while deploying the Carbon application: " + cAppName
                 + ". Reverting successfully deployed artifacts in the CApp.", e);
         undeployCarbonApp(currentApp, axisConfig);
@@ -338,6 +502,7 @@ public class CappDeployer extends AbstractDeployer {
         StringWriter sw = new StringWriter();
         e.printStackTrace(new PrintWriter(sw));
         currentApp.setFaultStackTrace(sw.toString());
+        currentApp.setEmbeddedCAR(isEmbeddedCAR);
         faultyCAppObjects.add(currentApp);
         faultyCapps.add(cAppName);
     }
@@ -823,6 +988,9 @@ public class CappDeployer extends AbstractDeployer {
         cAppMap.clear();
         faultyCapps.clear();
         faultyCAppObjects.clear();
+        retryPassCount = 0;
+        isRetrying = false;
+        highPriorityCAppCount = -1;
     }
 
     public void setSecretCallbackHandlerService(SecretCallbackHandlerService secretCallbackHandlerService) {
@@ -850,15 +1018,113 @@ public class CappDeployer extends AbstractDeployer {
     }
 
     /**
-     * Sorts the given list of DeploymentFileData objects between the specified indices according to the processing order of CApps.
-     * If any CApp is found without a descriptor.xml, the list is sorted alphabetically instead.
+     * Sorts the sub-range [startIndex, toIndex) of filesToDeploy.
      *
-     * @param filesToDeploy the list of DeploymentFileData objects to sort
-     * @param startIndex the starting index (inclusive) of the sublist to sort
-     * @param toIndex the ending index (exclusive) of the sublist to sort
+     * <p>Delegates to {@link #sortByPriority} when {@code server.enable_priority_deployment} is
+     * {@code true}, otherwise to {@link #sortByDependencyOrderWithFallback}.
+     *
+     * @param filesToDeploy - list of all deployment file data
+     * @param startIndex    - start index (inclusive) of the range to sort
+     * @param toIndex       - end index (exclusive) of the range to sort
      */
+    @Override
     public void sort(List<DeploymentFileData> filesToDeploy, int startIndex, int toIndex) {
+        if (isCAppPriorityDeploymentEnabled()) {
+            sortByPriority(filesToDeploy, startIndex, toIndex);
+        } else {
+            sortByDependencyOrderWithFallback(filesToDeploy, startIndex, toIndex);
+        }
+    }
 
+    /**
+     * Sorts the sub-range [startIndex, toIndex) of filesToDeploy with priority-based ordering.
+     *
+     * <p>Each .car file is inspected to determine whether it contains any high-priority artifact
+     * type ({@code lib/synapse/mediator}, {@code synapse/lib}, {@code registry/resource}).
+     * High-priority CApps are placed before low-priority ones; within each group the order is
+     * alphabetical by file name. {@link #highPriorityCAppCount} is set to the number of
+     * high-priority CApps so the retry pass in {@link #deployCarbonApplications} fires at the
+     * correct moment.
+     *
+     * @param filesToDeploy - list of all deployment file data
+     * @param startIndex    - start index (inclusive) of the range to sort
+     * @param toIndex       - end index (exclusive) of the range to sort
+     */
+    private void sortByPriority(List<DeploymentFileData> filesToDeploy, int startIndex, int toIndex) {
+        Comparator<DeploymentFileData> byFileName =
+                (a, b) -> a.getFile().getName().compareTo(b.getFile().getName());
+        if (log.isDebugEnabled()) {
+            log.debug("Sorting CApp files with priority order in range [" + startIndex + ", " + toIndex + ")");
+        }
+
+        List<DeploymentFileData> subList = new ArrayList<>(filesToDeploy.subList(startIndex, toIndex));
+
+        List<DeploymentFileData> highPriorityCApps = new ArrayList<>();
+        List<DeploymentFileData> lowPriorityCApps = new ArrayList<>();
+
+        for (DeploymentFileData fileData : subList) {
+            File carFile = new File(fileData.getAbsolutePath());
+            if (isHighPriorityCApp(carFile)) {
+                if (log.isDebugEnabled()) {
+                    log.debug("CApp classified as high priority: " + carFile.getName());
+                }
+                highPriorityCApps.add(fileData);
+            } else {
+                if (log.isDebugEnabled()) {
+                    log.debug("CApp classified as low priority: " + carFile.getName());
+                }
+                lowPriorityCApps.add(fileData);
+            }
+        }
+
+        highPriorityCAppCount = highPriorityCApps.size();
+
+        highPriorityCApps.sort(byFileName);
+        lowPriorityCApps.sort(byFileName);
+
+        if (log.isDebugEnabled()) {
+            log.debug("High priority CApps (" + highPriorityCApps.size() + "): " +
+                    highPriorityCApps.stream()
+                            .map(f -> new File(f.getAbsolutePath()).getName())
+                            .collect(Collectors.joining(", ")));
+            log.debug("Low priority CApps (" + lowPriorityCApps.size() + "): " +
+                    lowPriorityCApps.stream()
+                            .map(f -> new File(f.getAbsolutePath()).getName())
+                            .collect(Collectors.joining(", ")));
+        }
+
+        List<DeploymentFileData> sorted = new ArrayList<>();
+        sorted.addAll(highPriorityCApps);
+        sorted.addAll(lowPriorityCApps);
+
+        for (int i = 0; i < sorted.size(); i++) {
+            filesToDeploy.set(startIndex + i, sorted.get(i));
+        }
+
+        if (log.isDebugEnabled()) {
+            log.debug("CApp deployment order sorted: " + highPriorityCApps.size() + " high-priority CApp(s) followed by "
+                    + lowPriorityCApps.size() + " low-priority CApp(s).");
+        }
+    }
+
+    /**
+     * Attempts to sort the sub-range [startIndex, toIndex) of filesToDeploy by CApp dependency
+     * order derived from {@code descriptor.xml} files inside each .car archive.
+     *
+     * <p>Falls back to alphabetical ordering (via {@code super.sort}) when:
+     * <ul>
+     *   <li>No CApp has a descriptor.xml</li>
+     *   <li>Only some CApps have a descriptor.xml</li>
+     *   <li>Duplicate descriptors are detected</li>
+     *   <li>The dependency graph cannot be resolved (e.g. cycles or missing artifacts)</li>
+     *   <li>The input range is invalid</li>
+     * </ul>
+     *
+     * @param filesToDeploy - list of all deployment file data
+     * @param startIndex    - start index (inclusive) of the range to sort
+     * @param toIndex       - end index (exclusive) of the range to sort
+     */
+    private void sortByDependencyOrderWithFallback(List<DeploymentFileData> filesToDeploy, int startIndex, int toIndex) {
         File cAppDirFile = new File(this.cAppDir);
         File[] cAppFiles = cAppDirFile.listFiles((dir, name) -> name.endsWith(CAR_FILE_EXTENSION));
 
@@ -900,28 +1166,159 @@ public class CappDeployer extends AbstractDeployer {
             try {
                 File[] orderedAllCApps = getCAppProcessingOrder(cAppFiles);
 
-                // Build a map from file name to order index
                 Map<String, Integer> cAppOrderMap = new HashMap<>();
                 for (int i = 0; i < orderedAllCApps.length; i++) {
                     cAppOrderMap.put(orderedAllCApps[i].getName(), i);
                 }
 
-                // Extract the sublist to be sorted
                 List<DeploymentFileData> subList = filesToDeploy.subList(startIndex, toIndex);
-
-                // Sort sublist based on the position in orderedAllCApps
                 subList.sort(Comparator.comparingInt(dfd -> {
                     String name = dfd.getFile().getName();
-                    return cAppOrderMap.getOrDefault(name, Integer.MAX_VALUE); // unknown files go last
+                    return cAppOrderMap.getOrDefault(name, Integer.MAX_VALUE);
                 }));
             } catch (DuplicateCAppDescriptorException e) {
                 log.warn("Duplicate CApp descriptors found while determining the CApp processing order: " + e.getMessage());
+                super.sort(filesToDeploy, startIndex, toIndex);
             } catch (DeploymentException e) {
                 log.warn("Unable to determine the CApp processing order based on dependencies. " +
                                 "CApps will be deployed in alphabetical order instead. " + e.getMessage());
                 super.sort(filesToDeploy, startIndex, toIndex);
             }
         }
+    }
+
+    /**
+     * Determines whether a .car file is a high-priority CApp by inspecting the {@code type} attribute
+     * of each {@code <artifact>} element inside the archive's {@code artifact.xml} files.
+     *
+     * <p>A CApp is considered high priority if it contains any artifact with one of the types:
+     * <ul>
+     *   <li>{@code lib/synapse/mediator}  - class mediator</li>
+     *   <li>{@code synapse/lib}           - connector</li>
+     *   <li>{@code registry/resource}     - registry resource</li>
+     * </ul>
+     *
+     * <p>If {@code carFile} is not a regular file on disk (e.g., a path of the form
+     * {@code A.car/dependencies/B.car} representing a .car embedded inside another .car),
+     * the check is delegated to {@link #isHighPriorityEmbeddedCApp(File)}.
+     *
+     * @param carFile the .car file to inspect
+     * @return {@code true} if the CApp contains at least one high-priority artifact type, {@code false} otherwise
+     */
+    private boolean isHighPriorityCApp(File carFile) {
+        if (!carFile.isFile()) {
+            // Path like /path/A.car/dependencies/B.car — nested car inside another car
+            return isHighPriorityEmbeddedCApp(carFile);
+        }
+        try (ZipInputStream zipIn = new ZipInputStream(new FileInputStream(carFile))) {
+            return containsHighPriorityArtifact(zipIn, carFile.getName());
+        } catch (IOException e) {
+            log.warn("Error reading CApp file: " + carFile.getName() + ". Treating as low priority.", e);
+        }
+        return false;
+    }
+
+    /**
+     * Determines whether a .car file embedded inside another .car is a high-priority CApp.
+     *
+     * <p>Handles virtual paths of the form {@code /path/to/A.car/dependencies/B.car}, where
+     * {@code B.car} is a zip entry inside {@code A.car} rather than a standalone file on disk.
+     * The outer archive is opened, the inner entry is located by name, and its contents are
+     * scanned via {@link #containsHighPriorityArtifact(ZipInputStream, String)}.
+     *
+     * @param embeddedCarFile a {@link File} whose path encodes the outer .car and the inner entry name
+     * @return {@code true} if the embedded CApp contains at least one high-priority artifact type,
+     *         {@code false} if the entry cannot be resolved or contains no high-priority artifacts
+     */
+    private boolean isHighPriorityEmbeddedCApp(File embeddedCarFile) {
+        String absPath = embeddedCarFile.getAbsolutePath();
+        // Outer car ends at the first ".car" segment; remainder is the entry path inside it.
+        String marker = ".car" + File.separator;
+        int markerIdx = absPath.indexOf(marker);
+        if (markerIdx < 0) {
+            log.warn("CApp not found and path does not match nested pattern: " + absPath + ". Treating as low priority.");
+            return false;
+        }
+        File outerCar = new File(absPath.substring(0, markerIdx + 4)); // +4 for ".car"
+        // Zip entries always use '/' regardless of OS separator
+        String innerEntryName = absPath.substring(markerIdx + marker.length()).replace(File.separatorChar, '/');
+
+        if (!outerCar.isFile()) {
+            log.warn("Outer CApp not found: " + outerCar.getAbsolutePath() + ". Treating as low priority.");
+            return false;
+        }
+        try (ZipFile outerZip = new ZipFile(outerCar)) {
+            ZipEntry innerCarEntry = outerZip.getEntry(innerEntryName);
+            if (innerCarEntry == null) {
+                log.warn("Nested CApp entry '" + innerEntryName + "' not found in: "
+                        + outerCar.getName() + ". Treating as low priority.");
+                return false;
+            }
+            try (InputStream innerCarStream = outerZip.getInputStream(innerCarEntry);
+                 ZipInputStream innerZip = new ZipInputStream(innerCarStream)) {
+                return containsHighPriorityArtifact(innerZip, embeddedCarFile.getName());
+            }
+        } catch (IOException e) {
+            log.warn("Error reading nested CApp: " + absPath + ". Treating as low priority.", e);
+        }
+        return false;
+    }
+
+    /**
+     * Scans a {@link ZipInputStream} sequentially for {@code artifact.xml} entries and returns
+     * {@code true} as soon as one declares a high-priority artifact type.
+     *
+     * <p>Only entries whose name ends with {@code /<artifact-dir>/artifact.xml} are inspected;
+     * the top-level {@code artifacts.xml} descriptor is excluded by the leading {@code "/"} check.
+     *
+     * @param zipIn    the zip stream to scan; the caller is responsible for closing it
+     * @param cappName the CApp name used in log messages
+     * @return {@code true} if a high-priority artifact type is found, {@code false} otherwise
+     * @throws IOException if the stream cannot be read
+     */
+    private boolean containsHighPriorityArtifact(ZipInputStream zipIn, String cappName) throws IOException {
+        ZipEntry entry;
+        while ((entry = zipIn.getNextEntry()) != null) {
+            // Look only for artifact.xml files inside artifact directories (e.g., <artifact-dir>/artifact.xml).
+            // The top-level descriptor is named "artifacts.xml" so the "/" prefix check correctly excludes it.
+            if (!entry.isDirectory() && entry.getName().endsWith("/" + ARTIFACT_FILE)) {
+                try {
+                    OMElement artElement = secureXmlBuilder(zipIn).getDocumentElement();
+                    if (Artifact.ARTIFACT.equals(artElement.getLocalName())) {
+                        String artifactType = artElement.getAttributeValue(new QName(Artifact.TYPE));
+                        if (SYNAPSE_LIBRARY_TYPE.equals(artifactType) && HTTP_CONNECTOR_NAME.equals(
+                                artElement.getAttributeValue(new QName(Artifact.NAME)))) {
+                            continue;
+                        }
+                        if (artifactType != null && HIGH_PRIORITY_TYPES.contains(artifactType)) {
+                            if (log.isDebugEnabled()) {
+                                log.debug("Found high-priority artifact type '" + artifactType
+                                        + "' in CApp: " + cappName
+                                        + " [entry: " + entry.getName() + "]");
+                            }
+                            return true;
+                        }
+                    }
+                } catch (XMLStreamException | OMException e) {
+                    log.warn("Error parsing artifact.xml entry '" + entry.getName()
+                            + "' in CApp: " + cappName + ". Skipping entry.", e);
+                }
+            }
+            zipIn.closeEntry();
+        }
+        return false;
+    }
+
+    /**
+     * Creates a {@link StAXOMBuilder} for the given input stream using a hardened StAX parser
+     * with DTD support and external entity resolution disabled to prevent XXE attacks.
+     *
+     * @param in the input stream containing XML content
+     * @return a {@link StAXOMBuilder} ready to parse the document
+     * @throws XMLStreamException if the input stream cannot be read as valid XML
+     */
+    private static StAXOMBuilder secureXmlBuilder(InputStream in) throws XMLStreamException {
+        return new StAXOMBuilder(SECURE_XML_INPUT_FACTORY.createXMLStreamReader(in));
     }
 
     /**

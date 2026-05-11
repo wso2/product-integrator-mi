@@ -121,4 +121,5 @@ public class Constants {
     public static final String CAPP_GROUP_ID = "groupId";
     public static final String CAPP_ARTIFACT_ID = "artifactId";
     public static final String CAPP_VERSION = "version";
+    public static final String HTTP_CONNECTOR_NAME = "mi-connector-http";
 }

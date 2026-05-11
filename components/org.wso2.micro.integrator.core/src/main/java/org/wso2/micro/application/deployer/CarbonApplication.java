@@ -35,6 +35,7 @@ public class CarbonApplication {
     private ClassLoader classLoader;
     private String errorMessage;
     private String faultStackTrace;
+    private boolean embeddedCAR;
 
     private ApplicationConfiguration appConfig;
 
@@ -130,6 +131,14 @@ public class CarbonApplication {
 
     public void setFaultStackTrace(String faultStackTrace) {
         this.faultStackTrace = faultStackTrace;
+    }
+
+    public boolean isEmbeddedCAR() {
+        return embeddedCAR;
+    }
+
+    public void setEmbeddedCAR(boolean embeddedCAR) {
+        this.embeddedCAR = embeddedCAR;
     }
 
 }

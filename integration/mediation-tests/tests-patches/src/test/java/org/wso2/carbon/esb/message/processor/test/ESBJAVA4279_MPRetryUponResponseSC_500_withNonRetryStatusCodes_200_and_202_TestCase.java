@@ -22,6 +22,7 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 import org.wso2.carbon.automation.test.utils.http.client.HttpRequestUtil;
+import org.wso2.esb.integration.common.extensions.carbonserver.CarbonServerExtension;
 import org.wso2.esb.integration.common.utils.CarbonLogReader;
 import org.wso2.esb.integration.common.utils.ESBIntegrationTest;
 
@@ -46,6 +47,7 @@ public class ESBJAVA4279_MPRetryUponResponseSC_500_withNonRetryStatusCodes_200_a
     @BeforeClass(alwaysRun = true)
     public void deployService() throws Exception {
 
+        CarbonServerExtension.startServer();
         super.init();
         carbonLogReader = new CarbonLogReader();
         carbonLogReader.start();

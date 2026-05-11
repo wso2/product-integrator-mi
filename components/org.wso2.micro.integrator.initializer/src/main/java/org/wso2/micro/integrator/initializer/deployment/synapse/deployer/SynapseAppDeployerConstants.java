@@ -34,6 +34,7 @@ public class SynapseAppDeployerConstants {
     public static final String TEMPLATE_TYPE = "synapse/template";
     public static final String INBOUND_ENDPOINT_TYPE = "synapse/inbound-endpoint";
     public static final String SYNAPSE_LIBRARY_TYPE = "synapse/lib";
+    public static final String REGISTRY_RESOURCE_TYPE = "registry/resource";
     public static final String OTHER_TYPE = "other";
 
     // Deployment folders for synapse artifacts

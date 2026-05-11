@@ -167,7 +167,17 @@
             <class name="org.wso2.carbon.esb.car.deployment.test.ESBJAVA3546CAppProxyOnLoadTestCase"/>
             <class name="org.wso2.carbon.esb.car.deployment.test.ESBJAVA4116CAppArtifactDeploymentFailureDueToNameTestCase"/>
             <class name="org.wso2.carbon.esb.car.deployment.test.CARBON16113DeployArtifactsBeforeTransportStarsTestCase"/>
-            <class name="org.wso2.carbon.esb.car.deployment.test.FaultyCAppSwaggerRemovalTestCase"></class>
+            <class name="org.wso2.carbon.esb.car.deployment.test.FaultyCAppSwaggerRemovalTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityOrderDeploymentTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityDeploymentNoConfigTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityDeploymentDisabledTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityOnlyHighPriorityTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityOnlyLowPriorityTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityLowPriorityNotRetriedTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityRetryCountNotConfiguredTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityRetryCountZeroTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityRetryCountOneTestCase"/>
+            <class name="org.wso2.carbon.esb.car.deployment.test.CAppPriorityRetryCountMultipleTestCase"/>
         </classes>
     </test>
 

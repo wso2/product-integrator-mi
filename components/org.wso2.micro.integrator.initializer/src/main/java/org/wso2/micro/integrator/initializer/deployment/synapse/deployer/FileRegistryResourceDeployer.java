@@ -49,6 +49,7 @@ import javax.xml.stream.XMLStreamException;
 
 import static org.wso2.micro.application.deployer.AppDeployerUtils.createRegistryPath;
 import static org.wso2.micro.application.deployer.AppDeployerUtils.readChildText;
+import static org.wso2.micro.integrator.initializer.deployment.synapse.deployer.SynapseAppDeployerConstants.REGISTRY_RESOURCE_TYPE;
 
 /**
  * Carbon application deployer to deploy registry artifacts to file based registry
@@ -61,8 +62,6 @@ public class FileRegistryResourceDeployer implements AppDeploymentHandler {
     private static final String[] excludedDirectoryNames = new String[]{".meta"};
     private static final String MEDIA_TYPE = "mediaType";
 
-    private static final String REGISTRY_RESOURCE_TYPE = "registry/resource";
-    
     public FileRegistryResourceDeployer(Registry lightweightRegistry) {
         this.lightweightRegistry = lightweightRegistry;
     }

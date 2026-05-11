@@ -1,6 +1,8 @@
 [server]
 hostname = "localhost"
 # offset  = 10
+# enable_priority_deployment = true
+# priority_deployment_retry_count = 1
 
 [user_store]
 type = "read_only_ldap"
