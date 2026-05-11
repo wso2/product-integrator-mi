@@ -22,6 +22,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.inbound.InboundRequestProcessor;
 import org.apache.synapse.startup.quartz.StartUpController;
+import org.apache.synapse.task.TaskConstants;
 import org.apache.synapse.task.TaskDescription;
 import org.apache.synapse.task.TaskManager;
 import org.jetbrains.annotations.NotNull;
@@ -128,6 +129,7 @@ public abstract class InboundRequestProcessorImpl implements InboundRequestProce
         taskDescription.addProperty(TaskUtils.TASK_OWNER_PROPERTY, TaskUtils.TASK_BELONGS_TO_INBOUND_ENDPOINT);
         taskDescription.addProperty(TaskUtils.TASK_OWNER_NAME, name);
         taskDescription.setStartInPausedMode(startInPausedMode);
+        taskDescription.addProperty(TaskConstants.SKIP_START_IN_PAUSED_MODE_ASSIGNMENT, "true");
         return taskDescription;
     }
     
