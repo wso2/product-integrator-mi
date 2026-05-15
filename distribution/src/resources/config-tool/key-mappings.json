@@ -131,6 +131,10 @@
 
   "opentelemetry.filtered.mediator.names": "synapse_properties.'oltp.filtered.mediator.names'",
   "opentelemetry.custom.span.header.tags": "synapse_properties.'oltp.custom.span.header.tags'",
+  "opentelemetry.bsp.max.queue.size": "synapse_properties.'opentelemetry.bsp.max.queue.size'",
+  "opentelemetry.bsp.max.export.batch.size": "synapse_properties.'opentelemetry.bsp.max.export.batch.size'",
+  "opentelemetry.bsp.schedule.delay.millis": "synapse_properties.'opentelemetry.bsp.schedule.delay.millis'",
+  "opentelemetry.bsp.export.timeout.millis": "synapse_properties.'opentelemetry.bsp.export.timeout.millis'",
 
   "transport.http.socket_timeout": "passthru_properties.'http.socket.timeout'",
   "transport.http.block_service_list": "passthru_properties.'http.block_service_list'",
