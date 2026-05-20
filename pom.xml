@@ -2453,7 +2453,7 @@
         <osgi.framework.imp.pkg.version>[1.9.0,2.0.0)</osgi.framework.imp.pkg.version>
 
         <jakarta.servlet.api.version>6.1.0</jakarta.servlet.api.version>
-        <commons.configuration2.version>2.12.0</commons.configuration2.version>
+        <commons.configuration2.version>2.15.0</commons.configuration2.version>
         <commons.configuration2.imp.pkg.version>[2.12.0,3.0)</commons.configuration2.imp.pkg.version>
 
         <h2.engine.orbit.version>1.3.175.wso2v1</h2.engine.orbit.version>
