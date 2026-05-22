@@ -93,12 +93,6 @@
             <artifactId>org.wso2.micro.integrator.mediation.ntask</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.jacoco</groupId>
-            <artifactId>org.jacoco.agent</artifactId>
-            <classifier>runtime</classifier>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>org.apache.activemq</groupId>
             <artifactId>activemq-core</artifactId>
             <scope>test</scope>
@@ -201,7 +195,6 @@
                 <version>${maven.surefire.plugin.version}</version>
                 <configuration>
                     <systemPropertyVariables>
-                        <jacoco-agent.destfile>target/coverage-reports/jacoco-unit-commons.exec</jacoco-agent.destfile>
                         <org.apache.commons.logging.Log>org.apache.commons.logging.impl.SimpleLog
                         </org.apache.commons.logging.Log>
                         <org.apache.commons.logging.simplelog.defaultlog>error
@@ -211,35 +204,6 @@
                         <classpathDependencyExclude>org.wso2.org.ops4j.pax.logging</classpathDependencyExclude>
                     </classpathDependencyExcludes>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>default-instrument</id>
-                        <goals>
-                            <goal>instrument</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>default-restore-instrumented-classes</id>
-                        <goals>
-                            <goal>restore-instrumented-classes</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>default-report</id>
-                        <phase>prepare-package</phase>
-                        <goals>
-                            <goal>report</goal>
-                        </goals>
-                        <configuration>
-                            <dataFile>target/coverage-reports/jacoco-unit-inbound-endpoint.exec</dataFile>
-                            <outputDirectory>target/coverage-reports/site</outputDirectory>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

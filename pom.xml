@@ -2246,7 +2246,7 @@
         <docker.maven.plugin.version>1.0.0</docker.maven.plugin.version>
         <maven.resources.plugin.version>3.1.0</maven.resources.plugin.version>
         <maven.antrun.plugin.version>1.8</maven.antrun.plugin.version>
-        <maven.surefire.plugin.version>2.22.2</maven.surefire.plugin.version>
+        <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
         <jacoco.maven.plugin.version>0.8.12</jacoco.maven.plugin.version>
         <testng.version>6.11</testng.version>
         <javax.jms-api.version>2.0.1</javax.jms-api.version>
@@ -2635,6 +2635,86 @@
                     <target>21</target>
                 </configuration>
             </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.maven.plugin.version}</version>
+                <inherited>false</inherited>
+                <executions>
+                    <!-- Merge all component exec files into one -->
+                    <execution>
+                        <id>merge-component-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>merge</goal>
+                        </goals>
+                        <configuration>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.basedir}/components</directory>
+                                    <includes>
+                                        <include>**/target/jacoco.exec</include>
+                                    </includes>
+                                </fileSet>
+                            </fileSets>
+                            <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- JaCoCo Ant task: aggregate HTML/CSV/XML report + terminal coverage line.
+                 Must be declared AFTER jacoco plugin so merge runs first in verify phase. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <inherited>false</inherited>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>org.jacoco.ant</artifactId>
+                        <version>${jacoco.maven.plugin.version}</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>jacoco-aggregate-report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target xmlns:jacoco="antlib:org.jacoco.ant">
+                                <taskdef uri="antlib:org.jacoco.ant"
+                                         resource="org/jacoco/ant/antlib.xml"
+                                         classpathref="maven.plugin.classpath"/>
+                                <jacoco:report>
+                                    <executiondata>
+                                        <file file="${project.build.directory}/jacoco-merged.exec"/>
+                                    </executiondata>
+                                    <structure name="WSO2 Micro Integrator">
+                                        <classfiles>
+                                            <fileset dir="${project.basedir}/components">
+                                                <include name="**/target/classes/**/*.class"/>
+                                            </fileset>
+                                        </classfiles>
+                                    </structure>
+                                    <html destdir="${project.build.directory}/site/jacoco-aggregate"/>
+                                    <csv destfile="${project.build.directory}/site/jacoco-aggregate/jacoco.csv"/>
+                                    <xml destfile="${project.build.directory}/site/jacoco-aggregate/jacoco.xml"/>
+                                </jacoco:report>
+                                <exec executable="awk" outputproperty="jacoco.line.coverage" failonerror="false">
+                                    <arg value="-F,"/>
+                                    <arg value="NR&gt;1{m+=$8; c+=$9} END{printf &quot;Line coverage: %.1f%% (%d / %d lines covered)&quot;, c/(c+m)*100, c, c+m}"/>
+                                    <arg value="${project.build.directory}/site/jacoco-aggregate/jacoco.csv"/>
+                                </exec>
+                                <echo>&#10;========================================</echo>
+                                <echo>${jacoco.line.coverage}</echo>
+                                <echo>========================================&#10;</echo>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
         <pluginManagement>
             <plugins>
@@ -2706,6 +2786,14 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-surefire-plugin</artifactId>
                     <version>${maven.surefire.plugin.version}</version>
+                    <configuration>
+                        <argLine>@{argLine}
+                            --add-opens java.base/java.lang=ALL-UNNAMED
+                            --add-opens java.base/java.util=ALL-UNNAMED
+                            --add-opens java.base/java.lang.reflect=ALL-UNNAMED
+                            -XX:+EnableDynamicAgentLoading
+                        </argLine>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <groupId>org.jacoco</groupId>

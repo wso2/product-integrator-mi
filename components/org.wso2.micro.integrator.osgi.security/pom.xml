@@ -79,8 +79,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <inherited>true</inherited>
                 <configuration>
-                    <forkMode>pertest</forkMode>
-                    <argLine>-enableassertions</argLine>
+                    <forkCount>1</forkCount>
+                    <reuseForks>false</reuseForks>
+                    <argLine>-enableassertions @{argLine}</argLine>
                     <testFailureIgnore>false</testFailureIgnore>
                     <excludes>
                         <exclude>**/BaseTestCase.java</exclude>
