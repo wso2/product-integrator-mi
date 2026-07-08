@@ -2177,7 +2177,7 @@
 
         <carbon.analytics.common.version>5.2.67</carbon.analytics.common.version>
         <carbon.analytics.common.imp.pkg.version>[5.2.0, 6.0.0)</carbon.analytics.common.imp.pkg.version>
-        <fasterxml.jackson.version>2.21.3</fasterxml.jackson.version>
+        <fasterxml.jackson.version>2.21.5</fasterxml.jackson.version>
         <fasterxml.jackson.datatype.version>2.21.0</fasterxml.jackson.datatype.version>
         <fasterxml.jackson.annotations.version>2.21</fasterxml.jackson.annotations.version>
         <com.hubspot.immutables.version>1.11.3</com.hubspot.immutables.version>
