@@ -1,0 +1,52 @@
+<api xmlns="http://ws.apache.org/ns/synapse" context="/validateMediatorJsonSource" name="validateMediatorJsonSourceApi">
+    <resource methods="POST">
+        <inSequence>
+            <property name="metadata" expression="//metadata/text()" scope="default"/>
+            <validate source="json-eval($ctx:metadata)" cache-schema="true" json-source="true">
+                <schema key="validateJsonSourceSchema"/>
+                <on-fail>
+                    <payloadFactory media-type="json">
+                        <format>{"result": "fail"}</format>
+                        <args/>
+                    </payloadFactory>
+                    <respond/>
+                </on-fail>
+            </validate>
+            <payloadFactory media-type="json">
+                <format>{"result": "success"}</format>
+                <args/>
+            </payloadFactory>
+            <respond/>
+        </inSequence>
+    </resource>
+    <resource methods="POST" uri-template="/withoutSourceType">
+        <inSequence>
+            <property name="metadata" expression="//metadata/text()" scope="default"/>
+            <validate source="json-eval($ctx:metadata)" cache-schema="true">
+                <schema key="validateJsonSourceSchema"/>
+                <on-fail>
+                    <payloadFactory media-type="json">
+                        <format>{"result": "fail"}</format>
+                        <args/>
+                    </payloadFactory>
+                    <respond/>
+                </on-fail>
+            </validate>
+            <payloadFactory media-type="json">
+                <format>{"result": "success"}</format>
+                <args/>
+            </payloadFactory>
+            <respond/>
+        </inSequence>
+        <faultSequence>
+            <log level="full">
+                <property name="ERROR" value="Error occurred while processing the request"/>
+            </log>
+            <payloadFactory media-type="json">
+                <format>{"result": "error"}</format>
+                <args/>
+            </payloadFactory>
+            <respond/>
+        </faultSequence>
+    </resource>
+</api>
