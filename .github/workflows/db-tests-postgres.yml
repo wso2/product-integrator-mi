@@ -11,7 +11,9 @@ jobs:
         env:
           POSTGRES_USER: Root
           POSTGRES_PASSWORD: Root1234
-          POSTGRES_DB: postgres
+          # DatabaseManager's maintenance connection uses a URL with no db name,
+          # which the JDBC driver defaults to the username.
+          POSTGRES_DB: Root
         ports:
           - 5432:5432
         options: >-
@@ -27,16 +29,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21.0.4'
-
-      - name: Create DB schemas
-        env:
-          PGPASSWORD: Root1234
-        run: |
-          for f in postgresql_cluster.sql postgresql_user.sql \
-                   postgresql_task_monitoring.sql postgresql_transaction_count.sql; do
-            psql -v ON_ERROR_STOP=1 -h localhost -U Root -d postgres \
-              -f distribution/src/dbscripts/postgres/$f
-          done
 
       - name: Switch test configs to Postgres
         run: |
