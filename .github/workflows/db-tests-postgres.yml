@@ -15,6 +15,9 @@ on:
           - all
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -23,6 +26,8 @@ jobs:
     steps:
       - name: Resolve DB matrix from input
         id: pick
+        env:
+          INPUT_DB: ${{ inputs.db }}
         run: |
           # One entry per supported DB. 'toml' is the deployment.toml.<suffix>
           # variant checked into each tests-platform module ('' = default toml,
@@ -59,7 +64,7 @@ jobs:
             }
           ]
           EOF
-          choice="${{ inputs.db || 'postgres-18.3' }}"
+          choice="${INPUT_DB:-postgres-18.3}"
           if [ "$choice" = "all" ]; then
             include=$(jq -c . /tmp/dbs.json)
           else
@@ -96,6 +101,8 @@ jobs:
         options: ${{ matrix.health }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 21
         uses: actions/setup-java@v5
