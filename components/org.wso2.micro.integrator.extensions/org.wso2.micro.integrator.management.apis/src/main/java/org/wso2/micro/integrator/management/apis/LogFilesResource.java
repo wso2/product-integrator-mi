@@ -172,22 +172,44 @@ public class LogFilesResource extends APIResource {
     private DataHandler downloadArchivedLogFiles(String logFile) {
 
         ByteArrayDataSource bytArrayDS;
-        Path logFilePath = Paths.get(Utils.getCarbonLogsPath(), logFile);
 
-        File file = new File(logFilePath.toString());
-        if (file.exists() && !file.isDirectory()) {
-            try (InputStream is = new BufferedInputStream(new FileInputStream(logFilePath.toString()))) {
-                bytArrayDS = new ByteArrayDataSource(is, "text/xml");
-                return new DataHandler(bytArrayDS);
-            } catch (FileNotFoundException e) {
-                log.error("Could not find the requested file : " + logFile + " in : " + logFilePath.toString(), e);
-                return null;
-            } catch (IOException e) {
-                log.error("Error occurred while reading the file : " + logFile + " in : " + logFilePath.toString(), e);
+        try {
+            // Reject if fileName contains path separators
+            if (logFile.contains("/") || logFile.contains("\\")) {
+                log.error("Invalid characters in file name : " + logFile);
                 return null;
             }
-        } else {
-            log.error("Could not find the requested file : " + logFile + " in : " + logFilePath.toString());
+
+            // Canonicalize the intended base directory
+            Path logsBasePath = Paths.get(Utils.getCarbonLogsPath()).toRealPath();
+
+            // Resolve and normalize the full target path
+            Path logFilePath = logsBasePath.resolve(logFile).normalize();
+
+            // Validate the resolved path is still within the logs directory
+            if (!logFilePath.startsWith(logsBasePath)) {
+                log.error("Path traversal attempt detected for file : " + logFile);
+                return null;
+            }
+
+            File file = logFilePath.toFile();
+            if (file.exists() && !file.isDirectory()) {
+                try (InputStream is = new BufferedInputStream(new FileInputStream(file))) {
+                    bytArrayDS = new ByteArrayDataSource(is, "text/xml");
+                    return new DataHandler(bytArrayDS);
+                } catch (FileNotFoundException e) {
+                    log.error("Could not find the requested file : " + logFile + " in : " + logFilePath, e);
+                    return null;
+                } catch (IOException e) {
+                    log.error("Error occurred while reading the file : " + logFile + " in : " + logFilePath, e);
+                    return null;
+                }
+            } else {
+                log.error("Could not find the requested file : " + logFile + " in : " + logFilePath);
+                return null;
+            }
+        } catch (IOException e) {
+            log.error("Error resolving log file path for : " + logFile, e);
             return null;
         }
     }
