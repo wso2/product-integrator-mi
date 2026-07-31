@@ -127,8 +127,24 @@ public class FileRegistryResourceDeployer implements AppDeploymentHandler {
             if (log.isDebugEnabled()) {
                 log.debug("Undeploying registry artifact: " + artifact.getName());
             }
-            RegistryConfig regConfig = buildRegistryConfig(artifact, parentAppName);
-            removeArtifactFromRegistry(regConfig);
+            // Undeployment of registry artifacts is best effort. A failure to clean up one artifact
+            // must not abort the undeployment of the remaining artifacts, nor propagate to the CApp
+            // undeployment handler chain, since that would leave the CApp registered as deployed
+            // and prevent it from ever being deployed again.
+            try {
+                RegistryConfig regConfig = buildRegistryConfig(artifact, parentAppName);
+                if (regConfig == null) {
+                    log.error("Unable to build the registry configuration of artifact: "
+                        + artifact.getName()
+                        + ". Skipping the removal of its registry resources.");
+                    return;
+                }
+                removeArtifactFromRegistry(regConfig);
+            } catch (Exception e) {
+                log.error(
+                    "Error occurred while undeploying the registry artifact: " + artifact.getName()
+                        + ". Continuing with the remaining registry artifacts.", e);
+            }
         });
     }
 
@@ -272,7 +288,13 @@ public class FileRegistryResourceDeployer implements AppDeploymentHandler {
             }
             String resourcePath = AppDeployerUtils.computeResourcePath(createRegistryPath(resource.getPath()),
                                                                        resource.getFileName(), registryConfig);
-            lightweightRegistry.delete(resourcePath);
+            // Isolate the failure of a single resource so that the rest of the resources are still cleaned up.
+            try {
+                lightweightRegistry.delete(resourcePath);
+            } catch (Exception e) {
+                log.error("Error occurred while removing the registry resource: " + resourcePath
+                        + ". Continuing with the remaining resources.", e);
+            }
         }
 
         // get collections
