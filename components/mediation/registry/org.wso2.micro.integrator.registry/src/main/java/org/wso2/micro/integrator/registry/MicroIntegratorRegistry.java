@@ -531,6 +531,14 @@ public class MicroIntegratorRegistry extends AbstractRegistry {
             }
 
             String[] children = file.list();
+            if (children == null) {
+                // The directory was removed or became unreadable after the isDirectory() check above.
+                if (log.isDebugEnabled()) {
+                    log.debug("Unable to list the children of " + file.getPath()
+                        + ". It may have been removed concurrently.");
+                }
+                return null;
+            }
             RegistryEntry[] entries = new RegistryEntry[children.length];
 
             for (int i = 0; i < children.length; i++) {
@@ -839,9 +847,38 @@ public class MicroIntegratorRegistry extends AbstractRegistry {
         }
     }
 
+    /**
+     * Recursively deletes the given directory.
+     * <p>
+     * Deletion is treated as a convergent operation: the desired end state is that the directory is
+     * absent. The registry is not guarded against concurrent modification, so the same directory
+     * can be removed underneath us while we are deleting it. In a cluster this happens when the
+     * same CApp is hot-undeployed on several nodes that share the registry location, but it can
+     * equally be another thread of this node or an external process. In all of those cases the
+     * directory being already gone is a success, not a failure, so this method does not throw.
+     * Genuine failures (permission issues, IO errors, content being re-created underneath us)
+     * are logged so that they remain visible.
+     *
+     * @param dir directory to delete
+     */
     private void deleteDirectory(File dir) {
 
         File[] children = dir.listFiles();
+        if (children == null) {
+            // listFiles() returns null when the directory no longer exists, is not a directory,
+            // or could not be read.
+            if (!dir.exists()) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Unable to delete the resource as " + dir.getPath()
+                        + " does not exist. It may have already been deleted concurrently.");
+                }
+                return;
+            }
+            log.warn("Unable to list the contents of the registry directory: " + dir.getPath()
+                + ". Skipping the deletion of the directory.");
+            return;
+        }
+
         for (File child : children) {
             if (child != null) {
                 if (child.isFile()) {
@@ -854,7 +891,17 @@ public class MicroIntegratorRegistry extends AbstractRegistry {
 
         boolean success = dir.delete();
         if (!success) {
-            handleException("Unable to delete the resource: " + dir.getName());
+            if (!dir.exists()) {
+                // The directory was removed in the meantime. The desired end state is already reached.
+                if (log.isDebugEnabled()) {
+                    log.debug("The registry directory " + dir.getPath()
+                        + " has already been deleted concurrently while it was being removed.");
+                }
+            } else {
+                log.error("Unable to delete the resource: " + dir.getPath()
+                    + ". The directory still exists, it could be due to another process "
+                    + "holding or re-creating its content.");
+            }
         }
     }
 
