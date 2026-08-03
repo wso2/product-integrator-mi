@@ -114,7 +114,7 @@ public class HeartBeatComponent {
                     log.debug("Error occurred while sending the heartbeat.");
                 }
             } catch (Exception e) {
-                log.debug("Error occurred while processing the heartbeat.", e);
+                log.warn("Error occurred while processing the heartbeat.", e);
             }
         };
         scheduledExecutorService.scheduleAtFixedRate(runnableTask, 1, interval, TimeUnit.SECONDS);
