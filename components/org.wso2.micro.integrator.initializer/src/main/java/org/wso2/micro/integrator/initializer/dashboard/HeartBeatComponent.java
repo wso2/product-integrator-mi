@@ -54,6 +54,7 @@ import static org.wso2.micro.integrator.initializer.dashboard.Constants.DEFAULT_
 import static org.wso2.micro.integrator.initializer.dashboard.Constants.FORWARD_SLASH;
 import static org.wso2.micro.integrator.initializer.dashboard.Constants.HEADER_VALUE_APPLICATION_JSON;
 import static org.wso2.micro.integrator.initializer.dashboard.Constants.HTTPS_PREFIX;
+import static org.wso2.micro.integrator.initializer.dashboard.Constants.HTTP_PREFIX;
 import static org.wso2.micro.integrator.initializer.dashboard.Constants.MANAGEMENT;
 import static org.wso2.micro.integrator.initializer.dashboard.Constants.NODE_ID_SYSTEM_PROPERTY;
 import static org.wso2.micro.integrator.initializer.dashboard.Constants.PRODUCT_MI;
@@ -121,9 +122,14 @@ public class HeartBeatComponent {
     }
 
     private static String getMgtApiUrl() {
+        boolean isManagementApiHttps = ConfigurationLoader.getHttpsInternalApis().stream()
+                .anyMatch(api -> Constants.MANAGEMENT_API_NAME.equals(api.getName()));
+        String protocolPrefix = isManagementApiHttps ? HTTPS_PREFIX : HTTP_PREFIX;
+        String httpApiPort = Integer.toString(isManagementApiHttps
+                ? ConfigurationLoader.getInternalInboundHttpsPort() : ConfigurationLoader.getInternalInboundHttpPort());
+
         String serviceIp = System.getProperty("carbon.local.ip");
-        String httpApiPort = Integer.toString(ConfigurationLoader.getInternalInboundHttpsPort());
-        String mgtApiUrl = HTTPS_PREFIX.concat(serviceIp).concat(COLON).concat(httpApiPort).concat(FORWARD_SLASH)
+        String mgtApiUrl = protocolPrefix.concat(serviceIp).concat(COLON).concat(httpApiPort).concat(FORWARD_SLASH)
                                        .concat(MANAGEMENT).concat(FORWARD_SLASH);
 
         Object mgtApiServiceName = configs.get(Constants.DASHBOARD_CONFIG_MANAGEMENT_HOSTNAME);
@@ -132,10 +138,10 @@ public class HeartBeatComponent {
             Object configuredMgtPort = configs.get(Constants.DASHBOARD_CONFIG_MANAGEMENT_PORT);
             if (null != configuredMgtPort) {
                 String servicePort = configuredMgtPort.toString();
-                mgtApiUrl = HTTPS_PREFIX.concat(serviceIp).concat(COLON).concat(servicePort).concat(FORWARD_SLASH)
+                mgtApiUrl = protocolPrefix.concat(serviceIp).concat(COLON).concat(servicePort).concat(FORWARD_SLASH)
                                         .concat(MANAGEMENT).concat(FORWARD_SLASH);
             } else {
-                mgtApiUrl = HTTPS_PREFIX.concat(serviceIp).concat(FORWARD_SLASH).concat(MANAGEMENT)
+                mgtApiUrl = protocolPrefix.concat(serviceIp).concat(FORWARD_SLASH).concat(MANAGEMENT)
                                         .concat(FORWARD_SLASH);
             }
         }
