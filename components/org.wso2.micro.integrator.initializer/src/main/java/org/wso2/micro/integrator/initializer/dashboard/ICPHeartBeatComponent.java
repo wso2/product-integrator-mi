@@ -56,6 +56,7 @@ import org.apache.synapse.endpoints.HTTPEndpoint;
 import org.apache.synapse.endpoints.WSDLEndpoint;
 import org.apache.synapse.endpoints.AbstractEndpoint;
 import org.apache.synapse.endpoints.EndpointDefinition;
+import org.wso2.carbon.inbound.endpoint.internal.http.api.ConfigurationLoader;
 import org.wso2.config.mapper.ConfigParser;
 import org.wso2.micro.application.deployer.CarbonApplication;
 import org.wso2.micro.application.deployer.config.Artifact;
@@ -141,6 +142,15 @@ public class ICPHeartBeatComponent {
             return;
         }
 
+        ManagementEndpoint managementEndpoint;
+        try {
+            managementEndpoint = resolveManagementEndpoint();
+        } catch (IllegalArgumentException e) {
+            log.error("Invalid config for '" + ICP_CONFIG_MANAGEMENT_URL + "': " + e.getMessage()
+                    + " ICP heartbeat will not be started.");
+            return;
+        }
+
         // Fail fast if JWT secret/token generation is unavailable
         try {
             generateOrGetCachedJwtToken();
@@ -164,7 +174,7 @@ public class ICPHeartBeatComponent {
         });
         Runnable runnableTask = () -> {
             try {
-                sendDeltaHeartbeat(icpUrl);
+                sendDeltaHeartbeat(icpUrl, managementEndpoint);
             } catch (Exception e) {
                 log.error("Error occurred while sending delta heartbeat to ICP.", e);
             }
@@ -214,10 +224,10 @@ public class ICPHeartBeatComponent {
      * If ICP detects a hash mismatch, it will respond with
      * fullHeartbeatRequired=true.
      */
-    private static void sendDeltaHeartbeat(String icpUrl) {
+    private static void sendDeltaHeartbeat(String icpUrl, ManagementEndpoint managementEndpoint) {
         try {
             // Build full payload to calculate hash
-            JsonObject fullPayload = buildFullHeartbeatPayload(false);
+            JsonObject fullPayload = buildFullHeartbeatPayload(false, managementEndpoint);
             String currentHash = fullPayload.get(FIELD_RUNTIME_HASH).getAsString();
 
             // Build delta payload
@@ -235,7 +245,7 @@ public class ICPHeartBeatComponent {
             if (response != null && response.has("fullHeartbeatRequired")
                     && response.get("fullHeartbeatRequired").getAsBoolean()) {
                 log.info("ICP requested full heartbeat. Sending full heartbeat with all artifacts.");
-                sendFullHeartbeat(icpUrl);
+                sendFullHeartbeat(icpUrl, managementEndpoint);
             } else if (response != null && response.has("acknowledged")
                     && response.get("acknowledged").getAsBoolean()) {
                 if (log.isDebugEnabled()) {
@@ -250,9 +260,9 @@ public class ICPHeartBeatComponent {
     /**
      * Sends a full heartbeat to ICP with all artifact metadata.
      */
-    private static void sendFullHeartbeat(String icpUrl) {
+    private static void sendFullHeartbeat(String icpUrl, ManagementEndpoint managementEndpoint) {
         try {
-            JsonObject fullPayload = buildFullHeartbeatPayload(true);
+            JsonObject fullPayload = buildFullHeartbeatPayload(true, managementEndpoint);
             String fullEndpoint = icpUrl + ICP_HEARTBEAT_ENDPOINT;
 
             JsonObject response = sendHeartbeatRequest(fullEndpoint, fullPayload);
@@ -332,7 +342,8 @@ public class ICPHeartBeatComponent {
     /**
      * Builds the full heartbeat payload with all artifact metadata.
      */
-    private static JsonObject buildFullHeartbeatPayload(boolean includeTimestamp) throws IOException {
+    private static JsonObject buildFullHeartbeatPayload(boolean includeTimestamp,
+                                                         ManagementEndpoint managementEndpoint) throws IOException {
         JsonObject payload = new JsonObject();
         payload.addProperty("heartbeatVersion", HEARTBEAT_VERSION);
         payload.addProperty(Constants.RUNTIME_ID, getRuntimeId());
@@ -346,15 +357,8 @@ public class ICPHeartBeatComponent {
         payload.addProperty("project", getProject());
         payload.addProperty("component", getComponent());
         payload.addProperty("version", getMicroIntegratorVersion());
-        // Optional management endpoint details (hostname and port)
-        String runtimeHost = getICPApiHostname();
-        String runtimePort = getICPAPIPort();
-        if (!StringUtils.isEmpty(runtimeHost)) {
-            payload.addProperty("runtimeHostname", runtimeHost);
-        }
-        if (!StringUtils.isEmpty(runtimePort)) {
-            payload.addProperty("runtimePort", runtimePort);
-        }
+        payload.addProperty("runtimeHostname", managementEndpoint.getHostname());
+        payload.addProperty("runtimePort", String.valueOf(managementEndpoint.getPort()));
 
         // Node information
         JsonObject nodeInfo = new JsonObject();
@@ -395,52 +399,21 @@ public class ICPHeartBeatComponent {
         return payload;
     }
 
-    private static String getICPApiHostname() {
-        try {
-            Object configured = configs.get(HOSTNAME);
-            if (configured != null && !StringUtils.isEmpty(configured.toString())) {
-                return configured.toString();
-            }
-            String localIp = System.getProperty("carbon.local.ip");
-            if (!StringUtils.isEmpty(localIp)) {
-                return localIp;
-            }
-        } catch (Exception ignored) {
-            // fall through to default
+    private static ManagementEndpoint resolveManagementEndpoint() {
+        String managementUrl = getConfigValue(ICP_CONFIG_MANAGEMENT_URL);
+        if (managementUrl != null) {
+            return ManagementEndpoint.fromUrl(managementUrl);
         }
-        return ICP_API_DEFAULT_HOST;
+        return new ManagementEndpoint(getManagementHostname(), ConfigurationLoader.getInternalInboundHttpsPort());
     }
 
-    /**
-     * Resolves the ICP API port to report in the ICP heartbeat.
-     * Priority:
-     * 1) Calculated from `offset` (if provided)
-     * 2) Default ICP API port (9164)
-     */
-    private static String getICPAPIPort() {
-        try {
-            // Read offset only from dashboard config (no legacy checks)
-            int offset = 0;
-            Object offsetCfg = configs.get(PORT_OFFSET);
-            if (offsetCfg != null && !StringUtils.isEmpty(offsetCfg.toString())) {
-                try {
-                    offset = Integer.parseInt(offsetCfg.toString());
-                } catch (NumberFormatException ignored) {
-                    // keep offset = 0 if invalid
-                }
-            }
-
-            if (ICP_API_DEFAULT_PORT > 0) {
-                if (offset != 0) {
-                    int computed = ICP_API_DEFAULT_PORT - 10 + offset;
-                    return String.valueOf(computed);
-                }
-                return String.valueOf(ICP_API_DEFAULT_PORT);
-            }
-        } catch (Exception ignored) {
-            // fall through
+    private static String getManagementHostname() {
+        Object configured = configs.get(HOSTNAME);
+        if (configured != null && !StringUtils.isEmpty(configured.toString())) {
+            return configured.toString();
         }
-        return String.valueOf(ICP_API_DEFAULT_PORT);
+        String localIp = System.getProperty("carbon.local.ip");
+        return StringUtils.isEmpty(localIp) ? ICP_API_DEFAULT_HOST : localIp;
     }
 
     /**
