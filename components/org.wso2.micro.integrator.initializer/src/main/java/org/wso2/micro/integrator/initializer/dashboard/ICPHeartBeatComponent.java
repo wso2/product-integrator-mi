@@ -464,14 +464,22 @@ public class ICPHeartBeatComponent {
                 return createEmptyArtifactsStructure();
             }
 
-            Collection<CarbonApplication> carbonApps;
+            Collection<CarbonApplication> carbonApps = new java.util.ArrayList<>();
             try {
-                carbonApps = CappDeployer.getCarbonApps();
+                carbonApps.addAll(CappDeployer.getCarbonApps());
             } catch (Exception e) {
                 if (log.isDebugEnabled()) {
-                    log.debug("Error getting carbon apps list, proceeding without carbon app mapping", e);
+                    log.debug("Error getting active carbon apps list, proceeding without their mapping", e);
                 }
-                carbonApps = new java.util.ArrayList<>();
+            }
+            try {
+                // Include faulty CApp objects so artifacts from failed CARs
+                // (e.g. faulty data services) can still be mapped to their CApp.
+                carbonApps.addAll(CappDeployer.getFaultyCAppObjects());
+            } catch (Exception e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Error getting faulty carbon apps list, proceeding without their mapping", e);
+                }
             }
             Map<String, String> artifactCappMap = buildArtifactToCappMap(carbonApps);
 
@@ -1667,6 +1675,7 @@ public class ICPHeartBeatComponent {
                 try {
                     dsObj.addProperty("name", serviceName);
                     dsObj.addProperty("type", "DataService");
+                    dsObj.addProperty("status", "active");
 
                     // Add carbon app name
                     String carbonApp = lookupCarbonApp(serviceName, "dataservice", cappMap);
@@ -1719,6 +1728,31 @@ public class ICPHeartBeatComponent {
                     basicDsObj.addProperty("state", "UNKNOWN");
                     dataServices.add(basicDsObj);
                 }
+            }
+
+            // Collect faulty data services (deployment failures) with their error messages,
+            // similar to how faulty Carbon Applications are reported.
+            try {
+                Collection<org.wso2.micro.integrator.dataservices.core.FaultyDataService> faultyDataServices =
+                        org.wso2.micro.integrator.dataservices.core.DBDeployer.getFaultyDataServices();
+                for (org.wso2.micro.integrator.dataservices.core.FaultyDataService faultyDs : faultyDataServices) {
+                    JsonObject faultyDsObj = new JsonObject();
+                    faultyDsObj.addProperty("name", faultyDs.getServiceName());
+                    faultyDsObj.addProperty("type", "DataService");
+                    faultyDsObj.addProperty("status", "faulty");
+                    if (faultyDs.getErrorMessage() != null) {
+                        faultyDsObj.addProperty("errorMessage", faultyDs.getErrorMessage());
+                    }
+
+                    // Add carbon app name if the faulty service can be mapped to a CApp
+                    String carbonApp = lookupCarbonApp(faultyDs.getServiceName(), "dataservice", cappMap);
+                    if (carbonApp != null) {
+                        faultyDsObj.addProperty("carbonApp", carbonApp);
+                    }
+                    dataServices.add(faultyDsObj);
+                }
+            } catch (Exception e) {
+                log.error("Error collecting faulty Data Services", e);
             }
         } catch (Exception e) {
             log.error("Error collecting Data Services", e);
