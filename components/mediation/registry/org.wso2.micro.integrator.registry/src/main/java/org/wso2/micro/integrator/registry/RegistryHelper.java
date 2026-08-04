@@ -70,14 +70,27 @@ public class RegistryHelper {
     }
 
     /**
-     * Check whether the directory is empty
+     * Check whether the directory is empty.
+     * <p>
+     * Returns false when the path is not an existing directory or when its content cannot be
+     * listed, which includes the case where the directory was removed concurrently. Callers use
+     * this method to decide whether a directory should be cleaned up, so reporting false for a
+     * directory that is already gone correctly skips that cleanup.
      *
-     * @param directory  directory path
+     * @param directory directory path
      */
     public static boolean isDirectoryEmpty (String directory) {
         File file = new File(directory);
         if (file.isDirectory()) {
-            return file.list().length == 0;
+            String[] children = file.list();
+            if (children == null) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Unable to list the contents of " + directory
+                        + ". It may have been removed concurrently.");
+                }
+                return false;
+            }
+            return children.length == 0;
         } else {
             return false;
         }
