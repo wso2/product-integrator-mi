@@ -2163,7 +2163,7 @@
 
         <cipher.tool.version>1.2.10</cipher.tool.version>
         <axis2.transport.version>2.0.0-wso2v88</axis2.transport.version>
-        <transport.http.netty.version>6.4.2</transport.http.netty.version>
+        <transport.http.netty.version>6.4.3</transport.http.netty.version>
 
         <esotericsoftware.kryo.version>3.0.3</esotericsoftware.kryo.version>
         <esotericsoftware.minlog.version>1.3.1</esotericsoftware.minlog.version>
