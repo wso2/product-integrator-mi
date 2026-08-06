@@ -70,6 +70,11 @@ public class HeartBeatComponent {
     private static final Log log = LogFactory.getLog(HeartBeatComponent.class);
     private static final Map<String, Object> configs = ConfigParser.getParsedConfigs();
 
+    private static final int HEARTBEAT_WARN_THRESHOLD = 5;
+    // Confined to the single-threaded ScheduledExecutorService created in invokeHeartbeatExecutorService;
+    // do not change the executor to a multi-threaded one without switching this to AtomicInteger.
+    private static int consecutiveFailureCount = 0;
+
     public static void invokeHeartbeatExecutorService() {
         // Check if new ICP is configured
         if (ICPHeartBeatComponent.isICPConfigured()) {
@@ -110,11 +115,25 @@ public class HeartBeatComponent {
                 JsonObject jsonResponse = getJsonResponse(response);
                 if (jsonResponse != null && jsonResponse.get("status").getAsString().equals("success")) {
                     log.debug("Heartbeat sent successfully.");
+                    if (consecutiveFailureCount >= HEARTBEAT_WARN_THRESHOLD) {
+                        log.info("Heartbeat reporting to dashboard recovered after " + consecutiveFailureCount
+                                + " failed attempts.");
+                    }
+                    consecutiveFailureCount = 0;
                 } else {
                     log.debug("Error occurred while sending the heartbeat.");
                 }
             } catch (Exception e) {
                 log.debug("Error occurred while processing the heartbeat.", e);
+                consecutiveFailureCount++;
+                if (consecutiveFailureCount == HEARTBEAT_WARN_THRESHOLD) {
+                    log.warn("Heartbeat reporting to dashboard has failed " + consecutiveFailureCount
+                            + " consecutive times. Dashboard may be unreachable or misconfigured. "
+                            + "For further debugging, please refer debug logs.", e);
+                } else if (consecutiveFailureCount > HEARTBEAT_WARN_THRESHOLD) {
+                    log.warn("Error occurred while processing the heartbeat for " + consecutiveFailureCount
+                            + " consecutive times.", e);
+                }
             }
         };
         scheduledExecutorService.scheduleAtFixedRate(runnableTask, 1, interval, TimeUnit.SECONDS);
