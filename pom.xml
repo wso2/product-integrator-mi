@@ -2502,7 +2502,7 @@
         <messaging.saaj.version>1.5.1</messaging.saaj.version>
         <openjdk.nashorn.version>15.3</openjdk.nashorn.version>
         <ow2.asm.version>9.7</ow2.asm.version>
-        <jsoup.version>1.15.3</jsoup.version>
+        <jsoup.version>1.23.1</jsoup.version>
         <grpc-context.orbit.version>1.59.0.wso2v1</grpc-context.orbit.version>
         <opencensus.orbit.version>0.31.1.wso2v3</opencensus.orbit.version>
         <graalvm.version>25.1.3</graalvm.version>
