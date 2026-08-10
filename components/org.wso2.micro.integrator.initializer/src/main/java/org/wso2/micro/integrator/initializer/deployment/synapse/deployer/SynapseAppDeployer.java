@@ -78,6 +78,7 @@ import org.wso2.micro.application.deployer.handler.AppDeploymentHandler;
 import org.wso2.micro.core.util.StringUtils;
 import org.wso2.micro.integrator.core.util.MicroIntegratorBaseUtils;
 import org.wso2.micro.integrator.initializer.ServiceBusConstants;
+import org.wso2.micro.integrator.initializer.deployment.application.deployer.CappDeployer;
 import org.wso2.micro.integrator.initializer.ServiceBusUtils;
 import org.wso2.micro.integrator.initializer.persistence.MediationPersistenceManager;
 import org.wso2.micro.integrator.initializer.utils.ConfigurationHolder;
@@ -301,9 +302,14 @@ public class SynapseAppDeployer implements AppDeploymentHandler {
                         }
                         deployer.undeploy(artifactPath);
                     } else if (SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE.equals(artifact.getType())){
-                        String libQName = getArtifactName(artifactPath, axisConfig);
-                        deleteImport(libQName, axisConfig);
-                        deployer.undeploy(artifactPath);
+                        if (isLibraryUsedByOtherCApps(artifact.getName(), carbonApplication)) {
+                            log.info("Skipping undeployment of synapse library '" + artifact.getName()
+                                    + "' since it is still used by another deployed Carbon Application");
+                        } else {
+                            String libQName = getArtifactName(artifactPath, axisConfig);
+                            deleteImport(libQName, axisConfig);
+                            deployer.undeploy(artifactPath);
+                        }
                     } else if (SynapseAppDeployerConstants.SEQUENCE_TYPE.equals(artifact.getType())
                                && handleMainFaultSeqUndeployment(artifact, axisConfig)) {
                         log.debug("Handling main and fault sequence un-deployment");
@@ -1361,6 +1367,36 @@ public class SynapseAppDeployer implements AppDeploymentHandler {
 
     private String getConnectorName(String artifactName) {
         return artifactName.substring(0, artifactName.lastIndexOf("-connector"));
+    }
+
+    /**
+     * Checks whether a synapse library artifact is still declared as a dependency by another
+     * currently deployed Carbon Application, so a shared connector library is not removed while
+     * another CApp is still using it.
+     */
+    private boolean isLibraryUsedByOtherCApps(String libraryName, CarbonApplication currentApp) {
+
+        for (CarbonApplication otherApp : CappDeployer.getCarbonApps()) {
+            if (otherApp.getAppNameWithVersion().equals(currentApp.getAppNameWithVersion())) {
+                continue;
+            }
+            for (Artifact.Dependency dep : otherApp.getAppConfig().getApplicationArtifact().getDependencies()) {
+                Artifact otherArtifact = dep.getArtifact();
+                if (otherArtifact == null || !AppDeployerConstants.DEPLOYMENT_STATUS_DEPLOYED
+                        .equals(otherArtifact.getDeploymentStatus())) {
+                    continue;
+                }
+                if (SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE.equals(otherArtifact.getType())
+                        && libraryName.equals(otherArtifact.getName())) {
+                    return true;
+                }
+                if (SynapseAppDeployerConstants.CONNECTOR_DEPENDENCY_TYPE.equals(otherArtifact.getType())
+                        && libraryName.equals(otherArtifact.getConnector())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private String getTemplateName(String artifactPath, String name) {
