@@ -14,6 +14,17 @@ public class Constants {
     public static final String DASHBOARD_CONFIG_HEARTBEAT_INTERVAL = "dashboard_config.heartbeat_interval";
     public static final String DASHBOARD_CONFIG_MANAGEMENT_HOSTNAME = "dashboard_config.management_hostname";
     public static final String DASHBOARD_CONFIG_MANAGEMENT_PORT = "dashboard_config.management_port";
+    // Must be set to the same value as [mi_super_admin].password in the dashboard's deployment.toml. Registration
+    // now requires proving possession of that shared secret before the dashboard will register this node, so
+    // without it configured here the node can never get past a first-registration challenge.
+    public static final String DASHBOARD_CONFIG_ADMIN_PASSWORD = "dashboard_config.admin_password";
+
+    public static final String RESPONSE_FIELD_STATUS = "status";
+    public static final String RESPONSE_FIELD_CHALLENGE = "challenge";
+    public static final String REQUEST_FIELD_SIGNED_CHALLENGE = "signedChallenge";
+    public static final String STATUS_VALUE_CHALLENGE = "challenge";
+    public static final String STATUS_VALUE_SUCCESS = "success";
+    public static final String HMAC_ALGORITHM = "HmacSHA256";
 
     // New ICP Configuration
     public static final String ICP_API_DEFAULT_HOST = "localhost";
