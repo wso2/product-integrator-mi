@@ -129,8 +129,10 @@ export_env_file() {
     return 1  # Return with an error status
   fi
 
-  # Read the .env file and export each variable to the environment
-  while IFS='=' read -r key value; do
+  # Read the .env file and export each variable to the environment.
+  # The "|| [ -n "$key" ]" handles a final line without a trailing newline,
+  # for which "read" returns a non-zero status even though it sets the variables.
+  while IFS='=' read -r key value || [ -n "$key" ]; do
       # Ignore lines starting with '#' (comments) or empty lines
       case "$key" in
           \#*|"")
