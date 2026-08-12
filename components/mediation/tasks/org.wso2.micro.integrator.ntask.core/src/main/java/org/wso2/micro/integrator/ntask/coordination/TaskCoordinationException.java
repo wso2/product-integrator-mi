@@ -20,6 +20,10 @@ package org.wso2.micro.integrator.ntask.coordination;
 
 public class TaskCoordinationException extends Exception {
 
+    public TaskCoordinationException(String msg) {
+        super(msg);
+    }
+
     public TaskCoordinationException(String msg, Exception nestedEx) {
         super(msg, nestedEx);
     }

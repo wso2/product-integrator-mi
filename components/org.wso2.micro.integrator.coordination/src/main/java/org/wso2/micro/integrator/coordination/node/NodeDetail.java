@@ -48,6 +48,18 @@ public class NodeDetail {
     private boolean isCoordinator;
 
     /**
+     * The heartbeat window this node advertised (Heartbeat Advertise). 0 when the node has no
+     * advertisement row — the judge falls back to its local window.
+     */
+    private long heartbeatWindow;
+
+    /**
+     * The BOOT_ID observed on this node's advertisement row at read time; null when the node has no
+     * advertisement row. Conditions the removeNode() advertisement cleanup.
+     */
+    private String advertisedBootId;
+
+    /**
      * NodeDetail constructor.
      *
      * @param nodeId        node ID
@@ -106,6 +118,32 @@ public class NodeDetail {
      */
     public boolean isCoordinator() {
         return isCoordinator;
+    }
+
+    /**
+     * Getter method for the advertised heartbeat window.
+     *
+     * @return the advertised heartbeat window, or 0 when the node has no advertisement row
+     */
+    public long getHeartbeatWindow() {
+        return heartbeatWindow;
+    }
+
+    public void setHeartbeatWindow(long heartbeatWindow) {
+        this.heartbeatWindow = heartbeatWindow;
+    }
+
+    /**
+     * Getter method for the observed advertisement BOOT_ID.
+     *
+     * @return the BOOT_ID observed at read time, or null when the node has no advertisement row
+     */
+    public String getAdvertisedBootId() {
+        return advertisedBootId;
+    }
+
+    public void setAdvertisedBootId(String advertisedBootId) {
+        this.advertisedBootId = advertisedBootId;
     }
 
 }

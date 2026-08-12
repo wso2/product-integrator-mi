@@ -27,6 +27,7 @@ import org.apache.synapse.message.processor.MessageProcessor;
 import org.apache.synapse.task.TaskDescription;
 import org.apache.synapse.task.TaskDescriptionRepository;
 import org.wso2.micro.integrator.coordination.ClusterCoordinator;
+import org.wso2.micro.integrator.coordination.exception.ClusterCoordinationException;
 import org.wso2.micro.integrator.core.util.MicroIntegratorBaseUtils;
 import org.wso2.micro.integrator.ntask.common.TaskException;
 import org.wso2.micro.integrator.ntask.coordination.TaskCoordinationException;
@@ -36,17 +37,24 @@ import org.wso2.micro.integrator.ntask.coordination.task.resolver.TaskLocationRe
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
 import org.wso2.micro.integrator.ntask.coordination.task.store.connector.RDMBSConnector;
 import org.wso2.micro.integrator.ntask.coordination.task.store.cleaner.TaskStoreCleaner;
+import org.wso2.micro.integrator.ntask.core.BootLeaseController;
+import org.wso2.micro.integrator.ntask.core.CoordinationReadinessRegistry;
 import org.wso2.micro.integrator.ntask.core.TaskUtils;
+import org.wso2.micro.integrator.ntask.core.impl.EpisodeLog;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTaskManager;
+import org.wso2.micro.integrator.ntask.core.internal.BootLeaseControllerImpl;
 import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
 import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
+import org.wso2.micro.integrator.ntask.core.internal.TasksDSComponent;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -58,6 +66,9 @@ import java.util.concurrent.Future;
 public class CoordinatedTaskScheduler implements Runnable {
 
     private static final Log LOG = LogFactory.getLog(CoordinatedTaskScheduler.class);
+    private static final String DEPLOYED_BUT_ROWLESS_CONDITION = "deployed-but-rowless";
+    private static final String UNADVERTISED_MEMBER_CONDITION = "unadvertised-member";
+    private static final String UNADVERTISED_MEMBER_REASON = "UNADVERTISED_MEMBER";
 
     private DataHolder dataHolder = DataHolder.getInstance();
     private TaskLocationResolver taskLocationResolver;
@@ -70,6 +81,7 @@ public class CoordinatedTaskScheduler implements Runnable {
     private ScheduledTaskManager taskManager;
     private String localNodeId;
     private boolean isCoordinationStarted = true;
+    private final Set<String> unassignedTaskGraceSet = new HashSet<>();
 
     /**
      * Runs best-effort observation writes outside the scheduler loop. The thread is daemon so it never
@@ -88,6 +100,13 @@ public class CoordinatedTaskScheduler implements Runnable {
      * skips publishing instead of queuing another DB write with data that may already be stale.
      */
     private static volatile Future<?> observationWrite;
+
+    /**
+     * The unadvertised-member alarm state. Static so rejoin cycles neither register extra episode
+     * limiters nor forget which members were alarmed; only the single scheduler cycle thread touches it.
+     */
+    private static volatile EpisodeLog unadvertisedMemberEpisodes;
+    private static volatile Set<String> lastUnadvertisedMembers = Collections.emptySet();
 
     /**
      * Prevents repeatedly logging the same timing warning when the configured freshness window cannot fit
@@ -125,6 +144,12 @@ public class CoordinatedTaskScheduler implements Runnable {
                 }
             }
             isCoordinationStarted = false;
+            // the per-cycle park retry is simply the doorway again; a non-parked result removes the
+            // name and normal scheduling follows on this same cycle
+            taskManager.retryParkedRegistrations();
+            // the RETIRING responder — the same hook as the parked-registration retry, every node
+            taskManager.answerRetireWaves();
+            reportDeployedButRowless();
             pauseDeactivatedTasks();
             scheduleAssignedTasks(CoordinatedTask.States.ACTIVATED);
             checkInterrupted();
@@ -139,13 +164,18 @@ public class CoordinatedTaskScheduler implements Runnable {
                 addFailedTasks();
                 resolveCount++;
                 resolveUnassignedNotCompletedTasksAndUpdateStore();
+                reportUnadvertisedMembers();
                 // Only the leader opens, escalates, and closes duplicate-execution episodes.
                 detectDuplications();
             } else {
                 LOG.debug("This node is not leader. Hence not cleaning task store or resolving un assigned tasks.");
+                withdrawUnadvertisedMemberReport();
             }
             // schedule all tasks assigned to this node and in state none
             scheduleAssignedTasks(CoordinatedTask.States.NONE);
+            // Ownership Sweep before the observation write, so the published observation reflects the
+            // post-reconciliation truth and detector episodes close in the same cycle.
+            reconcileOwnership();
             // Publish this node's local running set after scheduling decisions for this cycle are done.
             recordRunningTaskObservations();
             checkInterrupted();
@@ -163,12 +193,137 @@ public class CoordinatedTaskScheduler implements Runnable {
             // serializes with the heartbeat thread's call and the second caller's snapshot is empty/residue.
             if (Thread.currentThread().isInterrupted() || DataHolder.getInstance().getTaskScheduler() == null) {
                 try {
-                    LOG.warn("Coordinated Task Scheduler is shutting down And Interrupt Detected. "
-                            + "Pausing all locally running tasks as part of final cleanup.");
+                    LOG.warn("Coordinated task scheduler shutdown was interrupted; pausing all locally running "
+                            + "tasks during final cleanup.");
                     taskManager.pauseAllLocallyRunningTasks();
-                } catch (Throwable t) {
-                    LOG.error("Cleanup in finally failed.", t);
+                } catch (Throwable cleanupFailure) {
+                    LOG.error("Cleanup in finally failed.", cleanupFailure);
                 }
+            }
+        }
+    }
+
+    /**
+     * The Ownership Sweep: every ~2-second cycle each node re-checks "am I still the owner of
+     * everything I'm running?" against the database and stops anything that is no longer its own. An
+     * event can be missed once; a standing check cannot be missed forever. Three rules that are
+     * correctness, not style: zero DB writes (the row now belongs to the new owner — local unschedule
+     * only), fail-open on read errors (reconciliation is a convergence aid, not the guarantee), and
+     * one cycle of grace for unassigned rows.
+     */
+    private void reconcileOwnership() {
+        if (!TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            return;   // master envelope only — CoordinatedTaskScheduler.run()
+        }             // is a stock path that also executes on master-off nodes
+        sweepOwnership();
+        // the completion stamp, read (DB-free) by the Reconcile-Stall Latch and the liveness
+        // view; an unexpected throw above skips it, so a stalled cycle stays visible
+        dataHolder.setLastSweepCompletionNanos(System.nanoTime());
+    }
+
+    private void sweepOwnership() {
+        Set<String> running = new HashSet<>(taskManager.getLocallyRunningCoordinatedTasks());
+        // Set, not the raw CopyOnWriteArrayList — shipped list can hold duplicates
+        // which would corrupt the mass-divergence size comparison below
+        if (running.isEmpty()) {
+            unassignedTaskGraceSet.clear();
+            return;
+        }
+        Map<String, String> assignedNodeByTask;
+        try {
+            assignedNodeByTask = new HashMap<>();
+            for (CoordinatedTask coordinatedTask : taskStore.getAllTaskNames()) {    // existing read,
+                assignedNodeByTask.put(coordinatedTask.getTaskName(), coordinatedTask.getDestinedNodeId()); // already used
+            }                                                          // by detectDuplications
+        } catch (Throwable storeReadFailure) {
+            // Fail-open: a flaky DB must not mass-pause a healthy node. If this node is
+            // genuinely partitioned, the Pause Watchdog pauses everything anyway.
+            LOG.warn("Ownership reconciliation skipped this cycle because the task store could not be read.",
+                    storeReadFailure);
+            return;
+        }
+        List<String> nonOwnedTaskNames = new ArrayList<>();
+        for (String task : running) {
+            String assignedNodeId = assignedNodeByTask.get(task);
+            if (assignedNodeId == null || assignedNodeId.isEmpty()) {
+                // Row missing or unassigned: usually mid-resolution. One cycle of grace.
+                if (!unassignedTaskGraceSet.add(task)) {
+                    nonOwnedTaskNames.add(task);
+                }
+                continue;
+            }
+            unassignedTaskGraceSet.remove(task);
+            if (!localNodeId.equals(assignedNodeId)) {
+                nonOwnedTaskNames.add(task);
+                LOG.warn("Task [" + task + "] is running locally but assigned to ["
+                        + assignedNodeId + "] — stopping the local instance (ownership "
+                        + "reconciliation).");
+            }
+        }
+        if (nonOwnedTaskNames.isEmpty()) {
+            return;
+        }
+        if (nonOwnedTaskNames.size() == running.size()) {
+            // Every locally running task is assigned elsewhere: this is the signature of a missed
+            // becameUnresponsive edge. Pause everything in one synchronized pass. The scheduler itself is alive,
+            // so it does not need the restart used by the reJoined path.
+            LOG.warn("All [" + running.size() + "] locally running coordinated tasks are assigned elsewhere; "
+                    + "treating this as a missed unresponsive or rejoin event and pausing all local tasks.");
+            taskManager.pauseAllLocallyRunningTasks();
+            unassignedTaskGraceSet.clear();
+            return;
+        }
+        List<String> successfullyStoppedTaskNames = new ArrayList<>();
+        for (String task : nonOwnedTaskNames) {
+            try {
+                stopLocallySurgically(task);
+                successfullyStoppedTaskNames.add(task);
+            } catch (Throwable localStopFailure) {
+                LOG.error("Failed to stop non-owned task [" + task + "]; will retry "
+                        + "next cycle.", localStopFailure);
+            }
+        }
+        unassignedTaskGraceSet.removeAll(successfullyStoppedTaskNames);
+    }
+
+    /**
+     * The single idempotent local stop every Ownership Sweep branch uses — safe to call twice.
+     */
+    private void stopLocallySurgically(String taskName) throws TaskException {
+        taskManager.stopExecutionTemporarily(taskName);
+    }
+
+    /**
+     * The deployed-but-rowless per-node continuous condition: this node continuously compares its
+     * local deployed set against the task table — independent coverage for the retire-vs-same-fp-
+     * redeploy residual and every other cause of a dark deployed task. Parked names are excluded;
+     * parking carries its own condition.
+     */
+    private void reportDeployedButRowless() {
+
+        if (!TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            return;
+        }
+        try {
+            Set<String> rowless = new HashSet<>(taskManager.getAllCoordinatedTasksDeployed());
+            if (!rowless.isEmpty()) {
+                for (CoordinatedTask task : taskStore.getAllTaskNames()) {
+                    rowless.remove(task.getTaskName());
+                }
+                rowless.removeIf(taskManager::isParked);
+            }
+            if (rowless.isEmpty()) {
+                TasksDSComponent.getReadinessRegistry().clear(DEPLOYED_BUT_ROWLESS_CONDITION);
+            } else {
+                TasksDSComponent.getReadinessRegistry().raise(DEPLOYED_BUT_ROWLESS_CONDITION,
+                        CoordinationReadinessRegistry.ConditionClass.CONTINUOUS,
+                        "this node's local deployed set contains coordinated artifact(s) with no task row: "
+                                + new TreeSet<>(rowless));
+            }
+        } catch (Throwable readFailure) {
+            // detection-only telemetry: a failed read never blocks the cycle
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("The deployed-but-rowless comparison did not complete this cycle.", readFailure);
             }
         }
     }
@@ -198,9 +353,9 @@ public class CoordinatedTaskScheduler implements Runnable {
                 List<String> running = taskManager.getLocallyRunningCoordinatedTasks();
                 long cycleTime = System.currentTimeMillis();
                 taskStore.recordObservations(localNodeId, running, cycleTime);
-            } catch (Throwable t) {
-                LOG.warn("Failed to record running task observations for duplication detection "
-                        + "(coordination DB may be turbulent); will retry next cycle.");
+            } catch (Throwable observationWriteFailure) {
+                LOG.warn("Failed to publish running-task observations for duplicate detection; the next scheduler "
+                        + "cycle will retry.", observationWriteFailure);
             }
         });
     }
@@ -251,26 +406,27 @@ public class CoordinatedTaskScheduler implements Runnable {
             }
 
             // Open an episode for each duplicate task that was not already being tracked.
-            Map<String, String> destinedByTask = null;
+            Map<String, String> assignedNodeByTask = null;
             for (String task : currentDuplicates) {
                 if (openTasks.contains(task)) {
                     continue;
                 }
-                if (destinedByTask == null) {
-                    destinedByTask = new HashMap<>();
+                if (assignedNodeByTask == null) {
+                    assignedNodeByTask = new HashMap<>();
                     for (CoordinatedTask coordinatedTask : taskStore.getAllTaskNames()) {
-                        destinedByTask.put(coordinatedTask.getTaskName(), coordinatedTask.getDestinedNodeId());
+                        assignedNodeByTask.put(coordinatedTask.getTaskName(), coordinatedTask.getDestinedNodeId());
                     }
                 }
                 Set<String> nodes = freshByTask.get(task);
-                String destined = destinedByTask.get(task);
-                taskStore.openDuplicationEpisode(task, String.join(",", nodes), destined, now, "UNEXPECTED");
+                String assignedNodeId = assignedNodeByTask.get(task);
+                taskStore.openDuplicationEpisode(task, String.join(",", nodes), assignedNodeId, now, "UNEXPECTED");
                 LOG.warn("Coordinated task duplication DETECTED - task [" + task + "] running on nodes " + nodes
-                        + "; DB owner [" + destined + "]. A node is running a coordinated task it does not own "
+                        + "; DB owner [" + assignedNodeId + "]. A node is running a coordinated task it does not own "
                         + "(possible heartbeat / clock skew).");
             }
-        } catch (Throwable t) {
-            LOG.warn("Coordinated task duplication detection cycle failed; will retry next cycle.");
+        } catch (Throwable duplicationDetectionFailure) {
+            LOG.warn("Coordinated task duplicate detection failed; the next scheduler cycle will retry.",
+                    duplicationDetectionFailure);
         }
     }
 
@@ -353,7 +509,8 @@ public class CoordinatedTaskScheduler implements Runnable {
             failedTasks.forEach(LOG::debug);
         }
         for (ScheduledTaskManager.TaskEntry task : failedTasks) {
-            taskStore.addTaskIfNotExist(task.getName(), task.getState());
+            // the retry routes through the doorway and honors its result; never a blind re-add
+            taskManager.retryAdditionFailedTask(task);
             taskManager.removeTaskFromAdditionFailedTaskList(task);
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Successfully added the failed task [" + task + "]");
@@ -381,6 +538,10 @@ public class CoordinatedTaskScheduler implements Runnable {
         List<String> deployedCoordinatedTasks = taskManager.getAllCoordinatedTasksDeployed();
         List<String> erroredTasks = new ArrayList<>();
         for (String taskName : tasksOfThisNode) {
+            if (taskManager.isParked(taskName)) {
+                // schedule only deployed AND not parked; the park's retry is the doorway itself
+                continue;
+            }
             if (deployedCoordinatedTasks.contains(taskName)) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Submitting retrieved task [" + taskName + "] to the task manager.");
@@ -422,7 +583,121 @@ public class CoordinatedTaskScheduler implements Runnable {
                 tasksToBeUpdated.put(taskName, destinedNode);
             }
         });
+        if (TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            // ownership publication (i): the LEADER assignment transition — one caller-owned
+            // transaction per task in deterministic task-name order; the DESTINED_NODE_ID write and
+            // the expected-epoch claim CAS (publishing the TARGET's advertised boot id) commit
+            // together, and a lost CAS rolls that task's transition back for the next cycle
+            String groupId = resolveLeaderPublicationGroupId();
+            if (groupId == null) {
+                LOG.warn("Skipping leader assignment publication: the boot lease controller is not installed.");
+                return;
+            }
+            List<String> orderedTasks = new ArrayList<>(tasksToBeUpdated.keySet());
+            Collections.sort(orderedTasks);
+            long now = System.currentTimeMillis();
+            for (String taskName : orderedTasks) {
+                boolean assigned = taskStore.assignTaskWithLeaderPublication(taskName,
+                        tasksToBeUpdated.get(taskName), groupId,
+                        clusterCoordinator.getHeartbeatMaxRetryInterval(), now);
+                if (!assigned) {
+                    LOG.info("Leader assignment of task [" + taskName + "] to node ["
+                            + tasksToBeUpdated.get(taskName) + "] did not commit this cycle (a stale snapshot "
+                            + "or a lapsed target loses the publication CAS); it will be retried.");
+                }
+            }
+            return;
+        }
         taskStore.updateAssignmentAndState(tasksToBeUpdated);
+    }
+
+    private String resolveLeaderPublicationGroupId() {
+
+        BootLeaseController controller = TasksDSComponent.getBootLeaseController();
+        if (controller instanceof BootLeaseControllerImpl) {
+            return ((BootLeaseControllerImpl) controller).getGroupId();
+        }
+        return null;
+    }
+
+    /**
+     * The ownership-publication candidacy rule's readiness half: an armed leader requires a fresh
+     * advertisement row per candidate, so a live member with no row is excluded from placement (its
+     * publication CAS can never commit) and the exclusion raises the continuous unadvertised-member
+     * readiness condition naming the excluded node(s), plus an episode-limited alarm per node. The
+     * condition clears when no unadvertised live member remains. A membership or advertisement read
+     * failure keeps the previous state — a failed read must never read as "everyone advertises".
+     */
+    private void reportUnadvertisedMembers() {
+
+        if (!TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            return;
+        }
+        String groupId = resolveLeaderPublicationGroupId();
+        if (groupId == null) {
+            return;
+        }
+        List<String> liveNodeIds;
+        try {
+            liveNodeIds = clusterCoordinator.getAllNodeIdsOrThrow();
+        } catch (ClusterCoordinationException e) {
+            LOG.warn("The live-member read of the unadvertised-member check failed; keeping the previous "
+                    + "readiness state this cycle.", e);
+            return;
+        }
+        Set<String> unadvertised = new TreeSet<>();
+        try {
+            for (String member : liveNodeIds) {
+                if (member.equals(localNodeId)) {
+                    continue;
+                }
+                if (taskStore.getNodeAdvertisement(groupId, member) == null) {
+                    unadvertised.add(member);
+                }
+            }
+        } catch (TaskCoordinationException e) {
+            LOG.warn("The advertisement read of the unadvertised-member check failed; keeping the previous "
+                    + "readiness state this cycle.", e);
+            return;
+        }
+        if (unadvertisedMemberEpisodes == null) {
+            unadvertisedMemberEpisodes = new EpisodeLog(localNodeId);
+        }
+        for (String member : unadvertised) {
+            unadvertisedMemberEpisodes.episodeWarn(member, UNADVERTISED_MEMBER_REASON,
+                    "Live member [" + member + "] advertises no boot lease; this armed leader excludes it "
+                            + "from placement — a process without an advertisement has unknown fence status.");
+        }
+        for (String member : lastUnadvertisedMembers) {
+            if (!unadvertised.contains(member)) {
+                unadvertisedMemberEpisodes.cleared(member);
+            }
+        }
+        lastUnadvertisedMembers = unadvertised;
+        if (unadvertised.isEmpty()) {
+            TasksDSComponent.getReadinessRegistry().clear(UNADVERTISED_MEMBER_CONDITION);
+        } else {
+            TasksDSComponent.getReadinessRegistry().raise(UNADVERTISED_MEMBER_CONDITION,
+                    CoordinationReadinessRegistry.ConditionClass.CONTINUOUS,
+                    "live member(s) " + unadvertised + " advertise no boot lease and are excluded from this "
+                            + "armed leader's placement");
+        }
+    }
+
+    /**
+     * The non-leader half: a node that is not leading excludes nobody, so any standing
+     * unadvertised-member report it made as leader is withdrawn.
+     */
+    private void withdrawUnadvertisedMemberReport() {
+
+        if (lastUnadvertisedMembers.isEmpty()) {
+            return;
+        }
+        for (String member : lastUnadvertisedMembers) {
+            unadvertisedMemberEpisodes.cleared(member);
+        }
+        lastUnadvertisedMembers = Collections.emptySet();
+        TasksDSComponent.getReadinessRegistry().clear(UNADVERTISED_MEMBER_CONDITION);
     }
 
     private void notifyOnPause(List<String> pausedTasks) {

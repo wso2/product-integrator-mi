@@ -84,6 +84,8 @@ public class CoordinatedTaskScheduleManager {
         int initialDelay = 0; // can start immediately as the task service is already registered.
         LOG.info("Triggering coordinated task scheduler with an initial delay of " + initialDelay + " second(s) and a "
                          + "period of " + executionPeriod + " second(s)" + msg + ".");
+        // the Ownership Sweep's completion stamp is initialized at scheduler start
+        DataHolder.getInstance().setLastSweepCompletionNanos(System.nanoTime());
         taskSchedulerExecutor.scheduleWithFixedDelay(taskScheduler, initialDelay, executionPeriod, TimeUnit.SECONDS);
         DataHolder.getInstance().setTaskScheduler(taskSchedulerExecutor);
     }

@@ -22,6 +22,7 @@ import org.apache.commons.logging.LogFactory;
 import org.wso2.config.mapper.ConfigParser;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Utility methods for task handling configuration flags loaded from deployment.toml.
@@ -44,8 +45,82 @@ public final class TaskHandlingConfigUtils {
     private static final long FRESHNESS_WINDOW_FLOOR_MS = 4000L;    // = 2 x the fixed 2s scheduler cycle
     private static final double FRESHNESS_HEARTBEAT_FACTOR = 0.75d; // stay strictly below the reassignment point
 
+    // The set-once coordination bootstrap holder — installed by the first activate() in this JVM, before
+    // either bootstrap starts; lives for the JVM lifetime (a component reactivation reuses it).
+    private static final AtomicReference<InstalledBootstrapState> BOOTSTRAP_STATE = new AtomicReference<>();
+
     private TaskHandlingConfigUtils() {
 
+    }
+
+    /**
+     * The only holder read legal before installation — never throws. activate() uses it to decide
+     * first-activation vs reactivation.
+     */
+    public static boolean isBootstrapStateInstalled() {
+        return BOOTSTRAP_STATE.get() != null;
+    }
+
+    /**
+     * Called by the first activate() in this JVM, before either bootstrap starts. A second install attempt
+     * is an IllegalState. snapshotOrNull is non-null iff state == ARMED.
+     */
+    public static void install(CoordinationBootstrapState state, CoordinationHardeningConfig snapshotOrNull) {
+        if (!BOOTSTRAP_STATE.compareAndSet(null, new InstalledBootstrapState(state, snapshotOrNull))) {
+            throw new IllegalStateException(
+                    "Coordination bootstrap state is already installed for this JVM. A same-JVM component "
+                            + "reactivation must reuse the installed state.");
+        }
+    }
+
+    public static CoordinationBootstrapState getBootstrapState() {
+        return installedBootstrapState().state;
+    }
+
+    /**
+     * == (state == ARMED) — the in-envelope gate every hardened consumer reads.
+     */
+    public static boolean isCoordinationHardeningEnabled() {
+        return installedBootstrapState().state == CoordinationBootstrapState.ARMED;
+    }
+
+    /**
+     * == (state == STOCK) — the only predicate that authorizes the stock coordination bootstrap / stock
+     * coordinated scheduling. REFUSING_PROFILE_INVALID answers false to both predicates.
+     */
+    public static boolean isStockCoordination() {
+        return installedBootstrapState().state == CoordinationBootstrapState.STOCK;
+    }
+
+    /**
+     * Non-null iff ARMED; IllegalState otherwise — never a null return.
+     */
+    public static CoordinationHardeningConfig getConfig() {
+        InstalledBootstrapState installed = installedBootstrapState();
+        if (installed.state != CoordinationBootstrapState.ARMED) {
+            throw new IllegalStateException("The coordination hardening snapshot exists only in the ARMED "
+                    + "bootstrap state. Current state: " + installed.state);
+        }
+        return installed.snapshot;
+    }
+
+    private static InstalledBootstrapState installedBootstrapState() {
+        InstalledBootstrapState installed = BOOTSTRAP_STATE.get();
+        if (installed == null) {
+            throw new IllegalStateException("The coordination bootstrap state has not been installed yet.");
+        }
+        return installed;
+    }
+
+    private static final class InstalledBootstrapState {
+
+        private final CoordinationBootstrapState state;
+        private final CoordinationHardeningConfig snapshot;
+
+        private InstalledBootstrapState(CoordinationBootstrapState state, CoordinationHardeningConfig snapshot) {
+            this.state = state;
+            this.snapshot = snapshot;
+        }
     }
 
     /**

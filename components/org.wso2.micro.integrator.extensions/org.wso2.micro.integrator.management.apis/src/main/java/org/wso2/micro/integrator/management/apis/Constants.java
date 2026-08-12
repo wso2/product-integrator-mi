@@ -38,6 +38,9 @@ public class Constants {
     public static final String PREFIX_REGISTRY_PROPERTIES = "/registry-resources/properties";
     public static final String PREFIX_TASKS = "/tasks";
     public static final String PREFIX_TASK_STATUS = "/task-status";
+    public static final String PREFIX_TASK_RECONFIGURE = "/task-reconfigure";
+    public static final String PREFIX_TASK_RETIRE = "/task-retire";
+    public static final String PREFIX_COORDINATION_READINESS = "/coordination-readiness";
     public static final String PREFIX_SEQUENCES = "/sequences";
     public static final String PREFIX_LOGGING = "/logging";
     public static final String PREFIX_USERS = "/users";

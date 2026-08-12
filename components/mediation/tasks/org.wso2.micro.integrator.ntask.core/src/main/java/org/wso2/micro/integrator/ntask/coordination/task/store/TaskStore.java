@@ -19,8 +19,11 @@
 package org.wso2.micro.integrator.ntask.coordination.task.store;
 
 import org.wso2.micro.integrator.ntask.coordination.TaskCoordinationException;
+import org.wso2.micro.integrator.ntask.coordination.task.ClaimOutcome;
 import org.wso2.micro.integrator.ntask.coordination.task.CoordinatedTask;
 import org.wso2.micro.integrator.ntask.coordination.task.store.connector.RDMBSConnector;
+import org.wso2.micro.integrator.ntask.core.RegistrationPhase;
+import org.wso2.micro.integrator.ntask.core.RegistrationResult;
 
 import java.util.List;
 import java.util.Map;
@@ -181,6 +184,151 @@ public class TaskStore {
     }
 
     /**
+     * The single registration doorway (armed nodes): the registration transaction matrix. The caller
+     * computes the canonical fingerprint and trigger family from the local definition BEFORE the call.
+     */
+    public RegistrationResult addTaskIfNotExist(String taskName, CoordinatedTask.States initialState,
+                                                String scheduleFingerprint, String triggerFamily, RegistrationPhase phase)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.addTaskIfNotExist(taskName, initialState, scheduleFingerprint, triggerFamily, phase);
+    }
+
+    /**
+     * The cleaner's repair — claim-status-only branches, no fingerprint input BY DESIGN:
+     * re-materializes a missing task row, never schedules, never parks/unparks.
+     */
+    public void repairMissingTaskRow(String taskName) throws TaskCoordinationException {
+
+        rdmbsConnector.repairMissingTaskRow(taskName);
+    }
+
+    /**
+     * Membership-rejoin hand-back: this node's surviving RUNNING rows driven back to
+     * NONE (destined kept) so the restarted scheduler pass re-schedules them.
+     */
+    public int handBackNodeRunningTasks(String nodeId) throws TaskCoordinationException {
+
+        return rdmbsConnector.handBackNodeRunningTasks(nodeId);
+    }
+
+    /**
+     * Hardened wave creation: the read-then-branch claim guard stamp + barrier/expected rows + this
+     * node's own ack, one lease-fenced transaction.
+     */
+    public RDMBSConnector.WaveHandle createOrJoinDeleteBarrier(String taskName, String candidateGuardUuid,
+                                                               String ownerNodeId, List<String> expectedNodeIds,
+                                                               long deadlineAt, long updatedAt)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.createOrJoinDeleteBarrier(taskName, candidateGuardUuid, ownerNodeId, expectedNodeIds,
+                deadlineAt, updatedAt);
+    }
+
+    /**
+     * Hardened barrier acknowledgement: the wave is located through the claim row's DELETE_GUARD and
+     * the ack write is boot-lease-fenced inside its own transaction.
+     */
+    public boolean acknowledgeOpenDeleteBarrierHardened(String taskName, String nodeId, long ackedAt)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.acknowledgeOpenDeleteBarrierHardened(taskName, nodeId, ackedAt);
+    }
+
+    /**
+     * The single guarded finalize with in-transaction Barrier Liveness classification, used identically
+     * by the leader path and the cleaner.
+     */
+    public RDMBSConnector.FinalizeReport finalizeDeleteBarrierClassified(String taskName, String guardUuid, long now,
+                                                                         long localWindowMillis)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.finalizeDeleteBarrierClassified(taskName, guardUuid, now, localWindowMillis);
+    }
+
+    /**
+     * Hardened cleaner recovery: re-classifies every in-flight wave each cycle through the one guarded
+     * finalize; a LIVE holdout leaves the wave OPEN.
+     */
+    public RDMBSConnector.BarrierRecoveryReport recoverInFlightDeleteBarriersClassified(String localNodeId,
+                                                                                        long localWindowMillis,
+                                                                                        long now)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.recoverInFlightDeleteBarriersClassified(localNodeId, localWindowMillis, now);
+    }
+
+    /**
+     * Barrier row read for the classifier and the skip-wait cross-node signal.
+     */
+    public RDMBSConnector.DeleteBarrierView getDeleteBarrier(String taskName, String guardUuid)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.getDeleteBarrier(taskName, guardUuid);
+    }
+
+    /**
+     * All barrier rows in the given status.
+     */
+    public List<RDMBSConnector.DeleteBarrierView> getDeleteBarriersByStatus(String status)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.getDeleteBarriersByStatus(status);
+    }
+
+    /**
+     * EXPECTED node ids of a wave.
+     */
+    public List<String> getBarrierExpectedNodes(String taskName, String guardUuid) throws TaskCoordinationException {
+
+        return rdmbsConnector.getBarrierExpectedNodes(taskName, guardUuid);
+    }
+
+    /**
+     * ACKed node ids of a wave.
+     */
+    public List<String> getBarrierAckNodes(String taskName, String guardUuid) throws TaskCoordinationException {
+
+        return rdmbsConnector.getBarrierAckNodes(taskName, guardUuid);
+    }
+
+    /**
+     * Peer LAST_HEARTBEAT from the cluster heartbeat table (the classifier's advisory read).
+     */
+    public Long getPeerLastHeartbeat(String groupId, String nodeId) throws TaskCoordinationException {
+
+        return rdmbsConnector.getPeerLastHeartbeat(groupId, nodeId);
+    }
+
+    /**
+     * Ownership publication (i): the leader assignment transition — the task-row DESTINED_NODE_ID
+     * write and the expected-epoch claim CAS publishing the TARGET's advertised boot id, one
+     * transaction per task.
+     */
+    public boolean assignTaskWithLeaderPublication(String taskName, String targetNodeId, String groupId,
+                                                   long localWindowMillis, long now)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.assignTaskWithLeaderPublication(taskName, targetNodeId, groupId, localWindowMillis,
+                now);
+    }
+
+    /**
+     * Ownership publication (ii): the target scheduling transition — destined-to-me RUNNING update +
+     * the CAS publishing THIS node's own live boot id; the JobDetail is built or rebuilt only after
+     * this commits.
+     */
+    public RDMBSConnector.PublishedOwnership publishTargetOwnershipAndRun(String taskName, String localNodeId,
+                                                                          String localScheduleFp,
+                                                                          String localTriggerFamily,
+                                                                          long localWindowMillis, long now)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.publishTargetOwnershipAndRun(taskName, localNodeId, localScheduleFp,
+                localTriggerFamily, localWindowMillis, now);
+    }
+
+    /**
      * Updates the state and node id.
      *
      * @param tasks - List of tasks to be updated.
@@ -239,6 +387,27 @@ public class TaskStore {
     }
 
     /**
+     * The Fenced Writes state transition — ownership plus fence currency (the writing job's claim
+     * tuple). Zero rows means fenced or already-applied.
+     *
+     * @param taskName       name of the task
+     * @param updatedState   state to write
+     * @param destinedNodeId the writing node's id
+     * @param incarnation    the writing job's stamped incarnation
+     * @param ownerEpoch     the writing job's stamped owner epoch
+     * @param ownerBootId    the writing job's stamped owner boot id
+     * @return true if exactly one row was updated
+     * @throws TaskCoordinationException when something goes wrong while updating
+     */
+    public boolean updateTaskStateFenced(String taskName, CoordinatedTask.States updatedState, String destinedNodeId,
+                                         int incarnation, long ownerEpoch, String ownerBootId)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.updateTaskStateFenced(taskName, updatedState, destinedNodeId, incarnation, ownerEpoch,
+                ownerBootId);
+    }
+
+    /**
      * Get All unassigned tasks except the completed ones.
      *
      * @return - List of unassigned and in complete tasks.
@@ -260,6 +429,40 @@ public class TaskStore {
 
     public String getMessageProcessorTaskState(String taskName) {
         return rdmbsConnector.getMessageProcessorState(taskName);
+    }
+
+    /**
+     * Attempts the atomic fire-claim CAS for one occurrence of a coordinated task. Never throws;
+     * every SQL/connection failure is returned as INDETERMINATE/EXCEPTION. Only WON dispatches.
+     *
+     * @param taskName      task name
+     * @param nodeId        this node's id
+     * @param fireKey       occurrence key computed on the firing thread
+     * @param ownerEpoch    owner epoch stamped in the job's fence tuple
+     * @param incarnation   incarnation stamped in the job's fence tuple
+     * @param bootId        owner boot id stamped in the job's fence tuple
+     * @param scheduleFingerprint    canonical schedule fingerprint stamped in the job's fence tuple
+     * @param triggerFamily trigger family carried by the job's fence tuple
+     * @param now           app-clock epoch millis
+     * @return the classified claim outcome
+     */
+    public ClaimOutcome claimFire(String taskName, String nodeId, long fireKey, long ownerEpoch, int incarnation,
+                                  String bootId, String scheduleFingerprint, String triggerFamily, long now) {
+
+        return rdmbsConnector.claimFire(taskName, nodeId, fireKey, ownerEpoch, incarnation, bootId, scheduleFingerprint,
+                triggerFamily, now);
+    }
+
+    /**
+     * The activation-readiness anti-join (never a row count): names every current task row lacking an
+     * OPEN claim row with a non-null fingerprint and a non-null trigger family, classified per task as
+     * missing / unexpectedly-CLOSED / unbound.
+     *
+     * @return task name to violation classification, empty when the invariant holds
+     * @throws TaskCoordinationException if operation fails
+     */
+    public Map<String, String> getActivationReadinessViolations() throws TaskCoordinationException {
+        return rdmbsConnector.getActivationReadinessViolations();
     }
 
     /**
@@ -364,6 +567,86 @@ public class TaskStore {
     }
 
     /**
+     * Reads this node's advertisement row (boot lease). Null when absent.
+     */
+    public RDMBSConnector.NodeAdvertisement getNodeAdvertisement(String groupId, String nodeId)
+            throws TaskCoordinationException {
+        return rdmbsConnector.getNodeAdvertisement(groupId, nodeId);
+    }
+
+    /**
+     * Inserts the complete advertisement value set for a fresh lease generation.
+     *
+     * @return true when inserted, false on a unique-violation race
+     */
+    public boolean insertNodeAdvertisement(String groupId, String nodeId, long heartbeatWindow, String bootId,
+                                           long bootStartedAt, String configFingerprint, long updatedAt)
+            throws TaskCoordinationException {
+        return rdmbsConnector.insertNodeAdvertisement(groupId, nodeId, heartbeatWindow, bootId, bootStartedAt,
+                configFingerprint, updatedAt);
+    }
+
+    /**
+     * The boot lease takeover CAS, conditioned on the exact observed tuple.
+     *
+     * @return the update count; 1 = lease won
+     */
+    public int takeoverNodeAdvertisement(String newBootId, long heartbeatWindow, String configFingerprint,
+                                         long bootStartedAt, long updatedAt, String groupId, String nodeId,
+                                         String expectedBootId, long expectedHeartbeatWindow, long expectedUpdatedAt)
+            throws TaskCoordinationException {
+        return rdmbsConnector.takeoverNodeAdvertisement(newBootId, heartbeatWindow, configFingerprint, bootStartedAt,
+                updatedAt, groupId, nodeId, expectedBootId, expectedHeartbeatWindow, expectedUpdatedAt);
+    }
+
+    /**
+     * The monotonic strictly-forward BOOT_ID-conditioned renewal touch, with the same-connection
+     * read-back verification on zero rows.
+     */
+    public RDMBSConnector.AdvertisementWriteResult touchNodeAdvertisement(String groupId, String nodeId, String bootId,
+                                                                          long mintedUpdatedAt)
+            throws TaskCoordinationException {
+        return rdmbsConnector.touchNodeAdvertisement(groupId, nodeId, bootId, mintedUpdatedAt);
+    }
+
+    /**
+     * Publishes ELIGIBILITY for this boot's row, headed by the monotonic renewal touch.
+     */
+    public RDMBSConnector.AdvertisementWriteResult publishEligibility(String groupId, String nodeId, String bootId,
+                                                                      long mintedUpdatedAt, String eligibility)
+            throws TaskCoordinationException {
+        return rdmbsConnector.publishEligibility(groupId, nodeId, bootId, mintedUpdatedAt, eligibility);
+    }
+
+    /**
+     * The shutdown release: BOOT_ID-conditioned delete of this boot's own advertisement row.
+     *
+     * @return the delete count
+     */
+    public int releaseNodeAdvertisement(String groupId, String nodeId, String bootId)
+            throws TaskCoordinationException {
+        return rdmbsConnector.releaseNodeAdvertisement(groupId, nodeId, bootId);
+    }
+
+    /**
+     * Retrieves every task currently destined to the given node, in deterministic name order.
+     */
+    public List<String> retrieveTaskNamesDestinedToNode(String nodeId) throws TaskCoordinationException {
+        return rdmbsConnector.retrieveTaskNamesDestinedToNode(nodeId);
+    }
+
+    /**
+     * One startup-handback task transition — the destination-conditioned unassignment, one transaction
+     * per task, headed by the monotonic renewal touch.
+     */
+    public RDMBSConnector.HandbackResult handBackDestinedTask(String taskName, String expectedDestinedNodeId,
+                                                              String groupId, String nodeId, String bootId,
+                                                              long mintedUpdatedAt) throws TaskCoordinationException {
+        return rdmbsConnector.handBackDestinedTask(taskName, expectedDestinedNodeId, groupId, nodeId, bootId,
+                mintedUpdatedAt);
+    }
+
+    /**
      * Replaces this node's previous running-task observation with the tasks seen in the current scheduler
      * cycle. The timestamp is supplied by the caller so every row from one publish uses the same cycle time.
      *
@@ -411,6 +694,57 @@ public class TaskStore {
      */
     public void closeDuplicationEpisode(String taskName, long clearedAt) throws TaskCoordinationException {
         rdmbsConnector.closeDuplicationEpisode(taskName, clearedAt);
+    }
+
+    /**
+     * The operator reconfigure — the only generation-changing operation: guarded close over the full
+     * expected tuple, checked reopen onto the computed target fingerprint, unassignment.
+     */
+    public RDMBSConnector.ReconfigureResult reconfigureTask(String taskName, int expectedIncarnation,
+                                                            String expectedScheduleFingerprint, String targetScheduleFingerprint,
+                                                            String targetFamily)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.reconfigureTask(taskName, expectedIncarnation, expectedScheduleFingerprint, targetScheduleFingerprint, targetFamily);
+    }
+
+    /**
+     * The operator task-retire — the operator-initiated delete wave, born STATUS='RETIRING' with the
+     * caller-stable operationId as the wave's durable guard.
+     */
+    public RDMBSConnector.RetireResult retireTask(String taskName, int expectedIncarnation, String operationId,
+                                                  List<String> expectedNodeIds, long deadlineAt, long now)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.retireTask(taskName, expectedIncarnation, operationId, expectedNodeIds, deadlineAt,
+                now);
+    }
+
+    /**
+     * The RETIRING responder's one indexed read: in-flight RETIRING waves where the node is in
+     * EXPECTED and has no ACK row.
+     */
+    public List<RDMBSConnector.RetiringWaveRef> getUnansweredRetiringWaves(String nodeId)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.getUnansweredRetiringWaves(nodeId);
+    }
+
+    /**
+     * The responder's consent: this node's boot-fenced ack, guard-scoped to the wave it read.
+     */
+    public boolean ackRetiringWave(String taskName, String guardUuid, String nodeId, long ackedAt)
+            throws TaskCoordinationException {
+
+        return rdmbsConnector.ackRetiringWave(taskName, guardUuid, nodeId, ackedAt);
+    }
+
+    /**
+     * The responder's durable dissent: RETIRING -> RETIRE_REFUSED + the claim-guard clear, task-locked.
+     */
+    public boolean refuseRetiringWave(String taskName, String guardUuid) throws TaskCoordinationException {
+
+        return rdmbsConnector.refuseRetiringWave(taskName, guardUuid);
     }
 
 }

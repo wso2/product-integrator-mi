@@ -29,10 +29,13 @@ import org.wso2.micro.integrator.ntask.coordination.task.resolver.TaskLocationRe
 import org.wso2.micro.integrator.ntask.coordination.task.scehduler.CoordinatedTaskScheduler;
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
 import org.wso2.micro.integrator.ntask.coordination.task.util.HotDeploymentWaveWaiter;
+import org.wso2.micro.integrator.ntask.core.BootLeaseController;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTaskManager;
+import org.wso2.micro.integrator.ntask.core.internal.BootLeaseControllerImpl;
 import org.wso2.micro.integrator.ntask.core.internal.CoordinatedTaskScheduleManager;
 import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
 import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
+import org.wso2.micro.integrator.ntask.core.internal.TasksDSComponent;
 
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -63,7 +66,19 @@ public class TaskEventListener extends MemberEventListener {
     public void memberAdded(NodeDetail nodeDetail) {
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Member added : " + nodeDetail.getNodeId());
+            LOG.debug("Cluster member joined: node id [" + nodeDetail.getNodeId() + "]");
+        }
+        // The Config Fence recheck on memberAdded (cheap: the joiner's row is fresh) — a drifted node
+        // joining later is flagged on the incumbent's side too, not only its own log. Detection on the
+        // incumbent's side, not a second enforcement point.
+        BootLeaseController bootLeaseController = TasksDSComponent.getBootLeaseController();
+        if (bootLeaseController instanceof BootLeaseControllerImpl) {
+            try {
+                ((BootLeaseControllerImpl) bootLeaseController).runConfigFenceComparison();
+            } catch (TaskCoordinationException fenceCheckFailure) {
+                LOG.warn("The Config Fence recheck on member addition of node [" + nodeDetail.getNodeId()
+                        + "] failed.", fenceCheckFailure);
+            }
         }
         if (clusterCoordinator.isLeader()) {
             LOG.debug("Current node is leader, hence resolving unassigned tasks upon member addition.");
@@ -73,9 +88,9 @@ public class TaskEventListener extends MemberEventListener {
                                                                                   clusterCommunicator);
             try {
                 taskScheduler.resolveUnassignedNotCompletedTasksAndUpdateStore();
-            } catch (TaskCoordinationException e) {
-                LOG.error("Exception occurred while resolving un assigned tasks upon member addition " + nodeDetail
-                        .getNodeId(), e);
+            } catch (TaskCoordinationException taskResolutionFailure) {
+                LOG.error("Failed to resolve unassigned tasks after cluster member joined: node id [" + nodeDetail
+                        .getNodeId() + "]", taskResolutionFailure);
             }
         }
     }
@@ -160,7 +175,23 @@ public class TaskEventListener extends MemberEventListener {
     @Override
     public void reJoined(String nodeId, RDBMSMemberEventCallBack callBack) {
 
-        LOG.debug("This node re-joined the cluster successfully.");
+        LOG.debug("Local node rejoined the coordination group: node id [" + nodeId + "].");
+        BootLeaseController bootLeaseController = TasksDSComponent.getBootLeaseController();
+        if (bootLeaseController != null) {
+            // Legacy restart paths are requests INTO the lease state machine: they may wake the
+            // recovery loop early, but they never clear a latch and never start dispatch while the
+            // state is not PROVEN.
+            bootLeaseController.wakeRecovery();
+            // A coordination-database stall makes becameUnresponsive kill the scheduler and
+            // pause the local jobs WITHOUT a lease transition (the Pause Watchdog observes JVM
+            // freezes, not DB stalls), so no lease exit will ever restart dispatch. The rejoin is
+            // that stall's recovery edge — hand this node's surviving RUNNING rows back and restart
+            // the scheduler, PROVEN-gated inside the controller.
+            if (bootLeaseController instanceof BootLeaseControllerImpl) {
+                ((BootLeaseControllerImpl) bootLeaseController).restartAfterMembershipRejoin();
+            }
+            return;
+        }
         try {
             // removing the node id so that it will be resolved and assigned again in case if member removal
             // hasn't happened already or the task hasn't been captured by task cleaning event.

@@ -74,6 +74,15 @@ public interface CommunicationBusContext {
     void removeCoordinator(String groupId, int age, long currentHeartbeatTime) throws ClusterCoordinationException;
 
     /**
+     * Remove this node's own coordinator entry from the database. NODE_ID-conditioned, so it can never
+     * delete a successor coordinator's row; zero rows deleted is success.
+     *
+     * @param groupId local group ID
+     * @param nodeId  local node ID
+     */
+    void removeCoordinatorSelf(String groupId, String nodeId) throws ClusterCoordinationException;
+
+    /**
      * Update Node heartbeat value to current time
      *
      * @param groupId local group ID

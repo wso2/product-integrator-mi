@@ -53,6 +53,8 @@ public class AuthorizationHandler extends AuthorizationHandlerAdapter {
         defaultResources.add(Constants.PREFIX_USERS);
         defaultResources.add(Constants.PREFIX_ROLES);
         defaultResources.add(Constants.PREFIX_CONFIGS);
+        defaultResources.add(Constants.PREFIX_TASK_RECONFIGURE);
+        defaultResources.add(Constants.PREFIX_TASK_RETIRE);
     }
 
     @Override

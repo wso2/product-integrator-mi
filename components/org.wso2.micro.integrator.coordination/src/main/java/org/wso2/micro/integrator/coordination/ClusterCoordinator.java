@@ -106,12 +106,36 @@ public class ClusterCoordinator {
     }
 
     /**
+     * The throwing live-member read: identical to {@link #getAllNodeIds()} minus the catch, for
+     * callers whose step must refuse on a membership-read failure instead of vacuously passing.
+     *
+     * @return - List of node ids.
+     * @throws ClusterCoordinationException when the membership read fails.
+     */
+    public List<String> getAllNodeIdsOrThrow() throws ClusterCoordinationException {
+
+        List<String> nodeIds = new ArrayList<>();
+        rdbmsCoordinationStrategy.getAllNodeDetails().forEach(node -> nodeIds.add(node.getNodeId()));
+        return nodeIds;
+    }
+
+    /**
      * Returns the id of this node.
      *
      * @return - Id of this node.
      */
     public String getThisNodeId() {
         return rdbmsCoordinationStrategy.getThisNodeId();
+    }
+
+    /**
+     * Registers the heartbeat hook on the coordination strategy. ntask holds this facade, never the
+     * strategy.
+     *
+     * @param hook - the heartbeat hook.
+     */
+    public void registerHeartbeatHook(HeartbeatHook hook) {
+        rdbmsCoordinationStrategy.registerHeartbeatHook(hook);
     }
 
 }

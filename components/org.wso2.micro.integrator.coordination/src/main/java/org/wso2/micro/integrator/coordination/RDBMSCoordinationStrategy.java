@@ -107,6 +107,19 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
 
     private boolean isCoordinatorTasksRunning;
 
+    /**
+     * Single-slot heartbeat hook (idempotent registration). No hook registered means renewal
+     * notification is a no-op and coordinator participation is always allowed.
+     */
+    private volatile HeartbeatHook heartbeatHook;
+
+    /**
+     * Join Grace: until this deadline the joinee observes only — no evictions and no coordinator-row
+     * removal/claim (unless no coordinator row exists at all). Established peers judge the joinee
+     * normally. 0 (never in grace) on a master-off node.
+     */
+    private volatile long joinObservationDeadline;
+
 
     /**
      * Possible node states
@@ -199,11 +212,23 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
         List<NodeDetail> liveNodeDetails = new ArrayList<>();
         for (NodeDetail nodeDetail : allNodeDetails) {
             long heartbeatAge = System.currentTimeMillis() - nodeDetail.getLastHeartbeat();
-            if (heartbeatAge < heartbeatMaxRetryInterval) {
+            if (heartbeatAge < effectiveWindow(nodeDetail)) {
                 liveNodeDetails.add(nodeDetail);
             }
         }
         return liveNodeDetails;
+    }
+
+    /**
+     * Heartbeat Advertise: every node is judged by the window that peer advertised — a judge can only ever
+     * widen its view of a peer (0 = no advertisement row = local window).
+     */
+    private long effectiveWindow(NodeDetail nodeDetail) {
+        return Math.max(heartbeatMaxRetryInterval, nodeDetail.getHeartbeatWindow());
+    }
+
+    private boolean isInJoinGrace() {
+        return System.currentTimeMillis() < joinObservationDeadline;
     }
 
     @Override
@@ -239,7 +264,7 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
             /*This check is done to verify if the node details in the database are of an inactive node.
             This check would fail if a node goes down and is restarted before the heart beat value expires.*/
             long heartbeatAge = System.currentTimeMillis() - nodeDetail.getLastHeartbeat();
-            isNodeExist = (heartbeatAge < heartbeatMaxRetryInterval);
+            isNodeExist = (heartbeatAge < effectiveWindow(nodeDetail));
         }
         return isNodeExist;
     }
@@ -258,6 +283,7 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
                 try {
                     //clear old membership events for the node
                     communicationBusContext.clearMembershipEvents(localNodeId, localGroupId);
+                    performJoinCheckAndStartGrace();
                     isCoordinatorTasksRunning = true;
                     retryClusterJoin = false;
                     this.threadExecutor.execute(new HeartBeatExecutionTask(false));
@@ -276,6 +302,48 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
             }
         } while (retryClusterJoin);
 
+    }
+
+    /**
+     * Join Check + the Join Grace deadline, run before the heartbeat task starts. A heartbeat-window
+     * mismatch always warns and proceeds — there is no policy knob (anything stricter would make the
+     * supported rolling heartbeat change impossible, and Heartbeat Advertise already makes window
+     * mismatch harmless). The Config Fence fingerprint mismatch always refuses, in its own section —
+     * never here. On a master-off node (no heartbeat hook) both are inactive: stock behavior.
+     */
+    private void performJoinCheckAndStartGrace() {
+        if (heartbeatHook == null) {
+            return;
+        }
+        long largestAdvertisedWindow = 0;
+        try {
+            List<NodeDetail> allNodeDetails = communicationBusContext.getAllNodeData(localGroupId);
+            for (NodeDetail nodeDetail : allNodeDetails) {
+                long heartbeatAge = System.currentTimeMillis() - nodeDetail.getLastHeartbeat();
+                if (heartbeatAge >= effectiveWindow(nodeDetail)) {
+                    continue;
+                }
+                long advertisedWindow = nodeDetail.getHeartbeatWindow();
+                if (advertisedWindow == 0) {
+                    continue;
+                }
+                if (advertisedWindow > largestAdvertisedWindow) {
+                    largestAdvertisedWindow = advertisedWindow;
+                }
+                if (advertisedWindow != heartbeatMaxRetryInterval) {
+                    log.warn("Heartbeat-window mismatch detected during cluster join: node [" + localNodeId + "] uses "
+                            + heartbeatMaxRetryInterval + "ms while node [" + nodeDetail.getNodeId()
+                            + "] advertises " + advertisedWindow + "ms. Before windows were advertised, the "
+                            + "stricter node could have declared healthy peers dead by its own clock rules, "
+                            + "evicted them and duplicated their coordinated tasks. Proceeding because peer-specific advertised windows keep liveness decisions safe.");
+                }
+            }
+        } catch (Throwable joinCheckFailure) {
+            log.warn("Join-time heartbeat-window check skipped (advertisement read failed); the join grace "
+                    + "period falls back to the local window.", joinCheckFailure);
+        }
+        joinObservationDeadline = System.currentTimeMillis()
+                + Math.max(heartbeatMaxRetryInterval, largestAdvertisedWindow);
     }
 
     @Override
@@ -323,6 +391,45 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
      */
     public String getThisNodeId() {
         return localNodeId;
+    }
+
+    /**
+     * Registers the heartbeat hook. Single slot, idempotent.
+     *
+     * @param hook - the hook invoked after each successful node heartbeat write and read once per
+     *             cycle for the coordinator-election control.
+     */
+    public void registerHeartbeatHook(HeartbeatHook hook) {
+        this.heartbeatHook = hook;
+        // hook present = ARMED node: the Heartbeat Advertise reads may touch NODE_ADVERTISEMENT
+        communicationBusContext.setAdvertisementReadsEnabled(true);
+    }
+
+    private boolean readCoordinatorParticipationAllowed() {
+        HeartbeatHook hook = heartbeatHook;
+        if (hook == null) {
+            return true;
+        }
+        try {
+            return hook.isCoordinatorParticipationAllowed();
+        } catch (Throwable participationCheckFailure) {
+            // fail closed for leadership, never for the heartbeat
+            log.warn("Heartbeat hook failed while reading coordinator participation. Reading as not allowed.", participationCheckFailure);
+            return false;
+        }
+    }
+
+    private void notifyAfterHeartbeat(long epochMillis) {
+        HeartbeatHook hook = heartbeatHook;
+        if (hook == null) {
+            return;
+        }
+        try {
+            hook.afterHeartbeat(epochMillis);
+        } catch (Throwable heartbeatHookFailure) {
+            // a hook failure is logged and never breaks the heartbeat
+            log.warn("Heartbeat hook failed after the node heartbeat write.", heartbeatHookFailure);
+        }
     }
 
     /**
@@ -414,6 +521,12 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
         private ExecutorService dbCommunicatorExecutor = Executors.newSingleThreadExecutor();
 
         /**
+         * Tracks whether the gate-skipped election has been logged, so the skip logs on state change,
+         * not per cycle.
+         */
+        private boolean electionSkipLogged;
+
+        /**
          * Constructor.
          *
          * @param nodeId           - node ID of the current node
@@ -435,6 +548,15 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
 
         public void runCoordinationElectionTask(long currentHeartbeatTime) {
             try {
+                boolean participationAllowed = readCoordinatorParticipationAllowed();
+                if (!participationAllowed && currentNodeState == NodeState.COORDINATOR) {
+                    // resign before the role switch; the node heartbeat write is the renewal carrier
+                    // and must not skip a beat, so fall through to the member path in the same cycle
+                    resignCoordinatorSelf();
+                    log.warn("Node [" + localNodeId + "] resigned coordinatorship: lease state forbids "
+                            + "coordinatorship.");
+                    currentNodeState = NodeState.MEMBER;
+                }
                 if (!previousNodeState.equals(currentNodeState)) {
                     log.info("Current node state changed from: " + previousNodeState + " to: " + currentNodeState);
                     previousNodeState = currentNodeState;
@@ -443,7 +565,7 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
                 long timeTakenForCoordinatorTasks[] = new long[5];
                 switch (currentNodeState) {
                     case MEMBER:
-                        performMemberTask(currentHeartbeatTime, timeTakenForMemberTasks);
+                        performMemberTask(currentHeartbeatTime, timeTakenForMemberTasks, participationAllowed);
                         break;
                     case COORDINATOR:
                         performCoordinatorTask(currentHeartbeatTime, timeTakenForCoordinatorTasks);
@@ -530,7 +652,8 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
          * @throws ClusterCoordinationException
          * @throws InterruptedException
          */
-        private void performMemberTask(long currentHeartbeatTime, long[] timeTakenForMemberTasks)
+        private void performMemberTask(long currentHeartbeatTime, long[] timeTakenForMemberTasks,
+                                       boolean electionAllowed)
                 throws ClusterCoordinationException, InterruptedException {
             long taskStartTime = System.currentTimeMillis();
             long taskEndTime;
@@ -543,14 +666,38 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
                 handleDatabaseDelay(localNodeId, localGroupId, e, "Error updating node heartbeat.");
                 throw e;
             }
+            notifyAfterHeartbeat(currentHeartbeatTime);
             taskEndTime = System.currentTimeMillis();
             timeTakenForMemberTasks[0] = taskEndTime - taskStartTime;
             taskStartTime = taskEndTime;
+            // Heartbeat Advertise: the coordinator row expires on the window the coordinator
+            // advertised — looked up by its NODE_ID from a fresh read this cycle, resolved in Java
+            // and passed as the threshold parameter. Local window on a master-off node.
+            String coordinatorNodeId = null;
+            int resolvedThreshold = heartbeatMaxRetryInterval;
+            if (heartbeatHook != null) {
+                try {
+                    coordinatorNodeId = performDBOperationsWithTimeout(() ->
+                            communicationBusContext.getCoordinatorNodeId(localGroupId));
+                    if (coordinatorNodeId != null) {
+                        String observedCoordinatorNodeId = coordinatorNodeId;
+                        long advertisedWindow = performDBOperationsWithTimeout(() ->
+                                communicationBusContext.getAdvertisedHeartbeatWindow(localGroupId,
+                                        observedCoordinatorNodeId));
+                        resolvedThreshold = (int) Math.max(heartbeatMaxRetryInterval, advertisedWindow);
+                    }
+                } catch (ClusterCoordinationException e) {
+                    handleDatabaseDelay(localNodeId, localGroupId, e,
+                            "Error resolving the coordinator's advertised heartbeat window.");
+                    throw e;
+                }
+            }
+            final int coordinatorExpiryThreshold = resolvedThreshold;
             boolean coordinatorValid;
             try {
                 coordinatorValid = performDBOperationsWithTimeout(() ->
                         communicationBusContext.checkIfCoordinatorValid
-                                (localGroupId, localNodeId, heartbeatMaxRetryInterval, currentHeartbeatTime)
+                                (localGroupId, localNodeId, coordinatorExpiryThreshold, currentHeartbeatTime)
                 );
             } catch (ClusterCoordinationException e) {
                 handleDatabaseDelay(localNodeId, localGroupId, e, "Error checking if coordinator is valid.");
@@ -560,23 +707,59 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
             timeTakenForMemberTasks[1] = taskEndTime - taskStartTime;
             if (!coordinatorValid) {
                 taskStartTime = taskEndTime;
-                try {
-                    performDBOperationsWithTimeout(() -> {
-                        communicationBusContext.removeCoordinator(localGroupId, heartbeatMaxRetryInterval
-                                , currentHeartbeatTime);
-                        return null;
-                    });
-                } catch (ClusterCoordinationException e) {
-                    handleDatabaseDelay(localNodeId, localGroupId, e, "Error removing coordinator for group "
-                            + localGroupId);
-                    throw e;
+                if (isInJoinGrace() && coordinatorNodeId != null) {
+                    // Join Grace: a coordinator row exists — the joinee observes only; removal/claim
+                    // resumes after the deadline. Fresh-cluster bootstrap (no row at all) proceeds.
+                    log.debug("grace period, deferring coordinator-row removal/claim for group ["
+                            + localGroupId + "]");
+                    taskEndTime = System.currentTimeMillis();
+                    timeTakenForMemberTasks[2] = taskEndTime - taskStartTime;
+                    timeTakenForMemberTasks[3] = 0;
+                } else {
+                    try {
+                        performDBOperationsWithTimeout(() -> {
+                            communicationBusContext.removeCoordinator(localGroupId, coordinatorExpiryThreshold
+                                    , currentHeartbeatTime);
+                            return null;
+                        });
+                    } catch (ClusterCoordinationException e) {
+                        handleDatabaseDelay(localNodeId, localGroupId, e, "Error removing coordinator for group "
+                                + localGroupId);
+                        throw e;
+                    }
+                    taskEndTime = System.currentTimeMillis();
+                    timeTakenForMemberTasks[2] = taskEndTime - taskStartTime;
+                    taskStartTime = taskEndTime;
+                    if (electionAllowed) {
+                        performElectionTask(currentHeartbeatTime);
+                    } else if (!electionSkipLogged) {
+                        log.debug("Election task skipped: coordinator participation is not allowed for node ["
+                                + localNodeId + "].");
+                        electionSkipLogged = true;
+                    }
+                    taskEndTime = System.currentTimeMillis();
+                    timeTakenForMemberTasks[3] = taskEndTime - taskStartTime;
                 }
-                taskEndTime = System.currentTimeMillis();
-                timeTakenForMemberTasks[2] = taskEndTime - taskStartTime;
-                taskStartTime = taskEndTime;
-                performElectionTask(currentHeartbeatTime);
-                taskEndTime = System.currentTimeMillis();
-                timeTakenForMemberTasks[3] = taskEndTime - taskStartTime;
+            }
+            if (electionAllowed) {
+                electionSkipLogged = false;
+            }
+        }
+
+        /**
+         * Deletes only this node's own coordinator row. A resign-delete failure is caught and logged;
+         * the demotion still happens and the abandoned row expires on the normal window — never retry
+         * inside the beat.
+         */
+        private void resignCoordinatorSelf() {
+            try {
+                performDBOperationsWithTimeout(() -> {
+                    communicationBusContext.removeCoordinatorSelf(localGroupId, localNodeId);
+                    return null;
+                });
+            } catch (Throwable resignationFailure) {
+                log.warn("Failed to delete own coordinator row while resigning coordinatorship for node ["
+                        + localNodeId + "]. The abandoned row expires on the normal window.", resignationFailure);
             }
         }
 
@@ -633,6 +816,7 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
                                    + " or verify the database connection.");
                     throw e;
                 }
+                notifyAfterHeartbeat(currentHeartbeatTime);
                 taskEndTime = System.currentTimeMillis();
                 timeTakenForCoordinatorTasks[1] = taskEndTime - taskStartTime;
                 taskStartTime = taskEndTime;
@@ -678,13 +862,22 @@ public class RDBMSCoordinationStrategy implements CoordinationStrategy {
             for (NodeDetail nodeDetail : allNodeInformation) {
                 long heartbeatAge = currentTimeMillis - nodeDetail.getLastHeartbeat();
                 String nodeId = nodeDetail.getNodeId();
-                if (heartbeatAge >= heartbeatMaxRetryInterval) {
+                // Heartbeat Advertise: eviction judged by the window the peer advertised
+                if (heartbeatAge >= effectiveWindow(nodeDetail)) {
+                    if (isInJoinGrace()) {
+                        // Join Grace restrains the joinee's judging of others, never others' of it
+                        log.debug("grace period, deferring eviction of [" + nodeId + "]");
+                        continue;
+                    }
                     removedNodes.add(nodeId);
                     allActiveNodeIds.remove(nodeId);
                     removedNodeDetails.add(nodeDetail);
                     try {
                         performDBOperationsWithTimeout(() -> {
-                            communicationBusContext.removeNode(nodeId, localGroupId);
+                            // advertisement cleanup conditioned on the BOOT_ID observed at judgment
+                            // time — a slow evictor can never erase a restarted successor's lease
+                            communicationBusContext.removeNode(nodeId, localGroupId,
+                                    nodeDetail.getAdvertisedBootId());
                             return null;
                         });
                     } catch (ClusterCoordinationException e) {

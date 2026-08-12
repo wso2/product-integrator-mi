@@ -19,6 +19,7 @@
 package org.wso2.micro.integrator.ntask.core.internal;
 
 import org.wso2.micro.integrator.coordination.ClusterCoordinator;
+import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTaskManager;
 
 import java.util.concurrent.ScheduledExecutorService;
@@ -34,6 +35,12 @@ public class DataHolder {
     private ClusterCoordinator clusterCoordinator;
     private ScheduledTaskManager taskManager;
     private ScheduledExecutorService taskScheduler;
+    private TaskStore taskStore;
+    private boolean coordinationConfigured;
+    // The Ownership Sweep's completion stamp (monotonic): re-initialized at every coordinated
+    // scheduler start, stamped by reconcileOwnership() on successful completion; 0 = no scheduler
+    // has started yet. Read (DB-free) by the Reconcile-Stall Latch and the liveness view.
+    private volatile long lastSweepCompletionNanos;
 
     private DataHolder() {
 
@@ -45,6 +52,19 @@ public class DataHolder {
 
     public boolean isCoordinationEnabledGlobally() {
         return clusterCoordinator != null;
+    }
+
+    /**
+     * The static configuration fact: the coordination datasource is configured. Evaluated once per
+     * activation in all three bootstrap states — unlike {@link #isCoordinationEnabledGlobally()},
+     * which reports whether the coordination bootstrap constructed a coordinator.
+     */
+    public boolean isCoordinationConfigured() {
+        return coordinationConfigured;
+    }
+
+    void setCoordinationConfigured(boolean coordinationConfigured) {
+        this.coordinationConfigured = coordinationConfigured;
     }
 
     public ClusterCoordinator getClusterCoordinator() {
@@ -81,6 +101,26 @@ public class DataHolder {
 
     public void setTaskScheduler(ScheduledExecutorService taskScheduler) {
         this.taskScheduler = taskScheduler;
+    }
+
+    public long getLastSweepCompletionNanos() {
+        return lastSweepCompletionNanos;
+    }
+
+    public void setLastSweepCompletionNanos(long lastSweepCompletionNanos) {
+        this.lastSweepCompletionNanos = lastSweepCompletionNanos;
+    }
+
+    /**
+     * The coordinated task store, for the operator management resources. Null until the coordination
+     * bootstrap constructs it.
+     */
+    public TaskStore getTaskStore() {
+        return taskStore;
+    }
+
+    void setTaskStore(TaskStore taskStore) {
+        this.taskStore = taskStore;
     }
 
 }
