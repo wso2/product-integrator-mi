@@ -795,7 +795,7 @@
         <jacoco.agent.version>0.8.12</jacoco.agent.version>
         <greenmail.version>1.3</greenmail.version>
         <esotericsoftware.kryo.version>3.0.3</esotericsoftware.kryo.version>
-        <rabbitmq.version>5.8.0</rabbitmq.version>
+        <rabbitmq.version>5.33.1</rabbitmq.version>
         <httpclient.wso2.version>4.3.2.wso2v1</httpclient.wso2.version>
         <httpcore.version>4.4.16</httpcore.version>
         <httpcore.nio.version>4.4.16</httpcore.nio.version>
