@@ -17,6 +17,8 @@
  */
 package org.wso2.micro.integrator.observability.metric.handler;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
 import org.apache.commons.lang3.StringUtils;
@@ -381,15 +383,25 @@ public class MetricHandler extends AbstractExtendedSynapseHandler {
         int invokePort = 0;
         if (null != ((Axis2MessageContext) synCtx).getAxis2MessageContext().
                 getProperty(NhttpConstants.SERVICE_PREFIX)) {
-            String servicePort = ((Axis2MessageContext) synCtx).getAxis2MessageContext().
+            String servicePrefix = ((Axis2MessageContext) synCtx).getAxis2MessageContext().
                     getProperty(NhttpConstants.SERVICE_PREFIX).toString();
-            servicePort = servicePort.substring(servicePort.lastIndexOf(':') + 1);
-            if (servicePort.contains(DELIMITER)) {
-                servicePort = servicePort.substring(0, servicePort.indexOf(DELIMITER));
-            }
-            invokePort = Integer.parseInt(servicePort);
+            invokePort = getServiceInvokePort(servicePrefix);
         }
         return invokePort;
+    }
+
+    /**
+     * Extract the port from a service prefix.
+     *
+     * @param servicePrefix the service prefix
+     * @return the port, or {@code -1} when it is absent or the prefix is invalid
+     */
+    static int getServiceInvokePort(String servicePrefix) {
+        try {
+            return new URI(servicePrefix).getPort();
+        } catch (URISyntaxException e) {
+            return -1;
+        }
     }
 
     /**
