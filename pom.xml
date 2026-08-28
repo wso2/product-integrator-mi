@@ -2148,7 +2148,7 @@
         <version.jaxb.api>2.4.0-b180830.0359</version.jaxb.api>
         <com.sun.jaxb.version>2.3.0</com.sun.jaxb.version>
         <com.sun.jaxb.impl.version>2.3.1</com.sun.jaxb.impl.version>
-        <synapse.version>4.1.0-wso2v65</synapse.version>
+        <synapse.version>4.1.0-wso2v67</synapse.version>
         <imp.pkg.version.synapse>[4.1.0, 4.2.0)</imp.pkg.version.synapse>
         <carbon.crypto.version>1.1.3</carbon.crypto.version>
         <carbon.crypto.api.imp.pkg.version.range>[1.1.0,1.2.0)</carbon.crypto.api.imp.pkg.version.range>
@@ -2237,9 +2237,9 @@
         <javasysmon.version>0.3.3.wso2v1</javasysmon.version>
         <version.eclipse.ecj>4.4.2</version.eclipse.ecj>
         <version.com.google.code.gson>2.14.0</version.com.google.code.gson>
-        <bcprov-jdk18on.version>1.84</bcprov-jdk18on.version>
-        <bcpg-jdk18on.version>1.84</bcpg-jdk18on.version>
-        <bcutil-jdk18on.version>1.83</bcutil-jdk18on.version>
+        <bcprov-jdk18on.version>1.85</bcprov-jdk18on.version>
+        <bcpg-jdk18on.version>1.85</bcpg-jdk18on.version>
+        <bcutil-jdk18on.version>1.85</bcutil-jdk18on.version>
         <tukaani.xz.version>1.9</tukaani.xz.version>
         <osgi.service.prefs.version>1.1.2</osgi.service.prefs.version>
         <equinox.http.service.api.version>1.2.2</equinox.http.service.api.version>
@@ -2508,7 +2508,7 @@
         <graalvm.version>25.1.3</graalvm.version>
         <icu.version>78.2</icu.version>
         <sparsebitset.version>1.3</sparsebitset.version>
-        <org.bouncycastle.bc.version>1.84</org.bouncycastle.bc.version>
+        <org.bouncycastle.bc.version>1.85</org.bouncycastle.bc.version>
         <failureaccess.version>1.0.3</failureaccess.version>
         <commons.lang.version>2.6</commons.lang.version>
         <orbit.version.json>3.0.0.wso2v8</orbit.version.json>
