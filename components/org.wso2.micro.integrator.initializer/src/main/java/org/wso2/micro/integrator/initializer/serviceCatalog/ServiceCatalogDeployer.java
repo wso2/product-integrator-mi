@@ -55,48 +55,53 @@ public class ServiceCatalogDeployer implements Runnable {
 
     @Override
     public void run() {
-        if (isHotDeployment) {
-            log.info("Executing Service Catalog deployer for CApp : " + cAppName);
-        } else {
-            log.info("Executing Service Catalog deployer for all CApps at server startup");
+        try {
+            if (isHotDeployment) {
+                log.info("Executing Service Catalog deployer for CApp : " + cAppName);
+            } else {
+                log.info("Executing Service Catalog deployer for all CApps at server startup");
+            }
+
+            /*
+             * Check pre-conditions:
+             * Validates whether the environment is ready to start the service-catalog uploader.
+             *
+             * This method performs the following checks:
+             * - No faulty Carbon Applications (CAPPs) are present.
+             * - At least one Carbon Application is deployed.
+             * - At least one API or Proxy Service is deployed in the super tenant domain.
+             *
+             * If any of these conditions fail, it logs the reason and exits.
+             */
+            if (!checkPreConditions()) return;
+
+            // call service catalog and get all services
+            Map<String, String> md5MapOfAllService = getAllServices(serviceCatalogConfiguration);
+            if (md5MapOfAllService == null) return; // error occurred while getting all services
+
+            // create temporary directory to hold metadata.
+            if (!createTemporaryFolders(CAPP_UNZIP_DIR)) return;
+
+            File tempDir = new File(CAPP_UNZIP_DIR, TEMP_FOLDER_NAME);
+
+            // extract CAPPs and copy metadata to temp directory.
+            // The behavior differs in server startup mode and hot deployment mode.
+            boolean extractionSuccessful = isHotDeployment
+                    ? extractMetadataFromCAPP(cAppName, tempDir, repoLocation, md5MapOfAllService)
+                    : extractMetadataFromCAPPs(tempDir, repoLocation, md5MapOfAllService);
+
+            if (!extractionSuccessful) {
+                return;
+            }
+
+            // create the payload.zip file with extracted metadata
+            if (!archiveDir(CAPP_UNZIP_DIR + File.separator + ZIP_FOLDER_NAME, tempDir.getPath())) return;
+
+            // publish to service catalog endpoint.
+            publishToAPIM(serviceCatalogConfiguration, CAPP_UNZIP_DIR + File.separator + ZIP_FOLDER_NAME);
+        } catch (Exception e) {
+            // Uncaught exceptions on this executor thread would otherwise be silently lost (stderr only).
+            log.error("Error while executing Service Catalog deployer for CApp : " + cAppName, e);
         }
-
-        /*
-         * Check pre-conditions:
-         * Validates whether the environment is ready to start the service-catalog uploader.
-         *
-         * This method performs the following checks:
-         * - No faulty Carbon Applications (CAPPs) are present.
-         * - At least one Carbon Application is deployed.
-         * - At least one API or Proxy Service is deployed in the super tenant domain.
-         *
-         * If any of these conditions fail, it logs the reason and exits.
-         */
-        if (!checkPreConditions()) return;
-
-        // call service catalog and get all services
-        Map<String, String> md5MapOfAllService = getAllServices(serviceCatalogConfiguration);
-        if (md5MapOfAllService == null) return; // error occurred while getting all services
-
-        // create temporary directory to hold metadata.
-        if (!createTemporaryFolders(CAPP_UNZIP_DIR)) return;
-
-        File tempDir = new File(CAPP_UNZIP_DIR, TEMP_FOLDER_NAME);
-
-        // extract CAPPs and copy metadata to temp directory.
-        // The behavior differs in server startup mode and hot deployment mode.
-        boolean extractionSuccessful = isHotDeployment
-                ? extractMetadataFromCAPP(cAppName, tempDir, repoLocation, md5MapOfAllService)
-                : extractMetadataFromCAPPs(tempDir, repoLocation, md5MapOfAllService);
-
-        if (!extractionSuccessful) {
-            return;
-        }
-
-        // create the payload.zip file with extracted metadata
-        if (!archiveDir(CAPP_UNZIP_DIR + File.separator + ZIP_FOLDER_NAME, tempDir.getPath())) return;
-
-        // publish to service catalog endpoint.
-        publishToAPIM(serviceCatalogConfiguration, CAPP_UNZIP_DIR + File.separator + ZIP_FOLDER_NAME);
     }
 }
