@@ -1,0 +1,125 @@
+name: DB tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      db:
+        description: 'Database to run the db-tests profile against'
+        type: choice
+        default: postgres-18.3
+        options:
+          - postgres-18.3
+          - mysql-8.0
+          - mariadb-11.4
+          - mssql-2022
+          - all
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      - name: Resolve DB matrix from input
+        id: pick
+        env:
+          INPUT_DB: ${{ inputs.db }}
+        run: |
+          # One entry per supported DB. 'toml' is the deployment.toml.<suffix>
+          # variant checked into each tests-platform module ('' = default toml,
+          # which is already MySQL). Credentials must match those tomls.
+          cat > /tmp/dbs.json <<'EOF'
+          [
+            {
+              "db": "postgres-18.3",
+              "image": "postgres:18.3",
+              "ports": "5432:5432",
+              "toml": "postgres",
+              "health": "--health-cmd \"pg_isready -U Root\" --health-interval 10s --health-timeout 5s --health-retries 10"
+            },
+            {
+              "db": "mysql-8.0",
+              "image": "mysql:8.0",
+              "ports": "3306:3306",
+              "toml": "",
+              "health": "--health-cmd \"mysqladmin ping -uroot -proot\" --health-interval 10s --health-timeout 5s --health-retries 10"
+            },
+            {
+              "db": "mariadb-11.4",
+              "image": "mariadb:11.4",
+              "ports": "3309:3306",
+              "toml": "mariadb",
+              "health": "--health-cmd \"healthcheck.sh --connect --innodb_initialized\" --health-interval 10s --health-timeout 5s --health-retries 10"
+            },
+            {
+              "db": "mssql-2022",
+              "image": "mcr.microsoft.com/mssql/server:2022-latest",
+              "ports": "1433:1433",
+              "toml": "mssql",
+              "health": ""
+            }
+          ]
+          EOF
+          choice="${INPUT_DB:-postgres-18.3}"
+          if [ "$choice" = "all" ]; then
+            include=$(jq -c . /tmp/dbs.json)
+          else
+            include=$(jq -c --arg db "$choice" '[.[] | select(.db == $db)]' /tmp/dbs.json)
+          fi
+          echo "Selected matrix: $include"
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
+  db-tests:
+    needs: plan
+    name: ${{ matrix.db }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.include) }}
+    services:
+      db:
+        image: ${{ matrix.image }}
+        # Union of the env vars each image needs; images ignore vars that are
+        # not theirs. Values must match the checked-in deployment.toml variants.
+        # POSTGRES_DB=Root because DatabaseManager's maintenance connection uses
+        # a URL with no db name, which the JDBC driver defaults to the username.
+        env:
+          POSTGRES_USER: Root
+          POSTGRES_PASSWORD: Root1234
+          POSTGRES_DB: Root
+          MYSQL_ROOT_PASSWORD: root
+          MARIADB_ROOT_PASSWORD: root
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Root1111
+        ports:
+          - ${{ matrix.ports }}
+        options: ${{ matrix.health }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21.0.4'
+
+      - name: Switch test configs to ${{ matrix.db }}
+        if: matrix.toml != ''
+        run: |
+          for m in tests-coordination tests-userstore tests-transaction; do
+            conf=integration/mediation-tests/tests-platform/$m/src/test/resources/artifacts/ESB/server/conf
+            cp $conf/deployment.toml.${{ matrix.toml }} $conf/deployment.toml
+          done
+
+      - name: Build MI
+        run: mvn -B clean install -DskipTests --file pom.xml
+
+      - name: Run DB tests
+        run: mvn -B clean install --file integration/pom.xml -P db-tests
