@@ -155,7 +155,7 @@ public class ServiceCatalogUtils {
                             httpsListenerPort = resolver.resolve();
                         } catch (ResolverException e) {
                             int portOffset = Integer.parseInt(System.getProperty(SERVER_PORT_OFFSET));
-                            int httpsPort = Integer.parseInt((String) parsedConfigs.get(HTTPS_LISTENER_PORT));
+                            int httpsPort = Integer.parseInt(String.valueOf(parsedConfigs.get(HTTPS_LISTENER_PORT)));
                             httpsListenerPort = String.valueOf(httpsPort + portOffset);
                         }
                     }
@@ -167,7 +167,7 @@ public class ServiceCatalogUtils {
                             httpListenerPort = resolver.resolve();
                         } catch (ResolverException e) {
                             int portOffset = Integer.parseInt(System.getProperty(SERVER_PORT_OFFSET));
-                            int httpsPort = Integer.parseInt((String) parsedConfigs.get(HTTP_LISTENER_PORT));
+                            int httpsPort = Integer.parseInt(String.valueOf(parsedConfigs.get(HTTP_LISTENER_PORT)));
                             httpListenerPort = String.valueOf(httpsPort + portOffset);
                         }
                     }
