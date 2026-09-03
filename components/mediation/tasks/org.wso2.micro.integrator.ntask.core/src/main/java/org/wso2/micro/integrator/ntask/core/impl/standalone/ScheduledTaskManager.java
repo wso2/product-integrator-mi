@@ -145,8 +145,6 @@ public class ScheduledTaskManager extends AbstractQuartzTaskManager {
         this.clusterCoordinator = DataHolder.getInstance().getClusterCoordinator();
         this.taskDeleteBarrierEnabled = TaskHandlingConfigUtils.isTaskDeleteBarrierEnabled();
         this.coordinationHardened = TaskHandlingConfigUtils.isCoordinationHardeningEnabled();
-        log.info("Clustered task delete barrier flow is " + (taskDeleteBarrierEnabled ? "enabled" : "disabled")
-                + ". Configure [" + TaskHandlingConfigUtils.TASK_DELETE_BARRIER_ENABLED_CONFIG + "] to control it.");
     }
 
     @Override
