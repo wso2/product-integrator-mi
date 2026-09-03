@@ -116,7 +116,7 @@ public class NTaskTaskManager implements TaskManager, TaskServiceObserver, Serve
                     if (logger.isDebugEnabled()) {
                         logger.debug("Submitting task [ " + taskId(taskDescription) + " ] to the task manager.");
                     }
-                    taskManager.handleTask(taskInfo.getName(), taskDescription.isStartInPausedMode());
+                    taskManager.handleTask(taskInfo.getName(), taskDescription.isStartInPausedMode(), null);
                 }
                 removeTask(taskDescription);
             }

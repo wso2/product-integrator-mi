@@ -28,11 +28,13 @@ import java.util.List;
 public interface TaskManager {
 
     /**
-     * Initialize the startup tasks.
+     * Initialize the startup tasks. The boot-pass handle is the explicit registration-phase signal
+     * threaded through the enumeration call chain; null == STEADY_STATE.
      *
+     * @param handle the generation-bound boot-pass handle, or null for STEADY_STATE
      * @throws TaskException Exception
      */
-    void initStartupTasks() throws TaskException;
+    void initStartupTasks(BootPassHandle handle) throws TaskException;
 
     /**
      * Reschedules a task with the given name, only the trigger information will be updated in the
@@ -54,13 +56,16 @@ public interface TaskManager {
 
     /**
      * Handles the task with given name. Schedule if its not coordinated else update the task DB.
+     * These are the ONLY handleTask signatures: the phase travels as the explicit handle parameter
+     * (null == STEADY_STATE) — no default/legacy overload leaves an un-phased path callable.
      *
      * @param taskName The name of the task
+     * @param handle   the generation-bound boot-pass handle, or null for STEADY_STATE
      * @throws TaskException Exception
      */
-    void handleTask(String taskName) throws TaskException;
+    void handleTask(String taskName, BootPassHandle handle) throws TaskException;
 
-    void handleTask(String taskName, boolean scheduledInPausedMode) throws TaskException;
+    void handleTask(String taskName, boolean scheduledInPausedMode, BootPassHandle handle) throws TaskException;
 
     /**
      * Get all the coordinated tasks ( the tasks which need db interaction ) deployed in this node.

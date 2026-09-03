@@ -58,6 +58,27 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
     private String databaseType = null;
     private QueryManager queryManager;
 
+    /**
+     * Heartbeat Advertise read gate: the NODE_ADVERTISEMENT table is only touched on an ARMED node —
+     * the master envelope disengages every mechanism, and on a master-off cluster the table may not
+     * exist. Set when the heartbeat hook is registered.
+     */
+    private volatile boolean advertisementReadsEnabled;
+
+    /**
+     * One node's advertised identity observed at read time.
+     */
+    private static final class AdvertisedIdentity {
+
+        private final long heartbeatWindow;
+        private final String bootId;
+
+        private AdvertisedIdentity(long heartbeatWindow, String bootId) {
+            this.heartbeatWindow = heartbeatWindow;
+            this.bootId = bootId;
+        }
+    }
+
     public RDBMSCommunicationBusContextImpl(DataSource dataSource) {
         this.datasource = dataSource;
 
@@ -407,6 +428,43 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
     }
 
     @Override
+    public void removeCoordinatorSelf(String groupId, String nodeId) throws ClusterCoordinationException {
+        Connection connection = null;
+        boolean isRolledBack = false; // Flag to track if rollback has occurred
+        boolean isTransactionSuccessful = false;
+        PreparedStatement preparedStatement = null;
+        try {
+            connection = getConnection();
+            preparedStatement = connection.prepareStatement(queryManager.getQuery(
+                    DBQueries.REMOVE_COORDINATOR_SELF));
+            preparedStatement.setString(1, groupId);
+            preparedStatement.setString(2, nodeId);
+            // zero rows deleted is success — the row is own-node conditioned
+            preparedStatement.executeUpdate();
+            commitTransactionIfNotInterrupted(connection);
+            isTransactionSuccessful = true;
+            if (log.isDebugEnabled()) {
+                log.debug(RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF + " of node " + nodeId + " in group "
+                        + groupId + " executed successfully");
+            }
+        } catch (SQLException | InterruptedException e) {
+            rollback(connection, RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF);
+            isRolledBack = true; // Mark as rolled back
+            log.warn("Transaction rolled back for task: " + RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF);
+            throw new ClusterCoordinationException("Error occurred while "
+                    + RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF + ". Node ID: " + nodeId + " and Group ID: "
+                    + groupId, e);
+        } finally {
+            if (!isTransactionSuccessful && !isRolledBack && Thread.currentThread().isInterrupted()) {
+                rollback(connection, RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF);
+                log.warn("Transaction rolled back for task: " + RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF);
+            }
+            close(preparedStatement, RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF);
+            close(connection, RDBMSConstantUtils.TASK_REMOVE_COORDINATOR_SELF);
+        }
+    }
+
+    @Override
     public boolean updateNodeHeartbeat(String nodeId, String groupId, long currentHeartbeatTime)
             throws ClusterCoordinationException {
         Connection connection = null;
@@ -534,10 +592,104 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
             close(preparedStatement, RDBMSConstantUtils.TASK_GET_ALL_QUEUES);
             close(connection, RDBMSConstantUtils.TASK_GET_ALL_QUEUES);
         }
+        // Heartbeat Advertise: join the advertised windows in memory by NODE_ID — read fresh on every
+        // call, never cached.
+        Map<String, AdvertisedIdentity> advertisements = readNodeAdvertisements(groupId);
+        for (NodeDetail nodeDetail : nodeDataList) {
+            AdvertisedIdentity advertised = advertisements.get(nodeDetail.getNodeId());
+            if (advertised != null) {
+                nodeDetail.setHeartbeatWindow(advertised.heartbeatWindow);
+                nodeDetail.setAdvertisedBootId(advertised.bootId);
+            }
+        }
         if (log.isDebugEnabled()) {
             log.debug(RDBMSConstantUtils.TASK_GET_ALL_QUEUES + " of group " + groupId + " executed successfully");
         }
         return nodeDataList;
+    }
+
+    /**
+     * Turns advertisement reads on once the node is ARMED (the heartbeat hook is registered). Until
+     * then no read touches NODE_ADVERTISEMENT and every judge falls back to its local window.
+     */
+    public void setAdvertisementReadsEnabled(boolean enabled) {
+        this.advertisementReadsEnabled = enabled;
+    }
+
+    /**
+     * Reads every advertised (window, boot id) of the group, keyed by NODE_ID. Empty when the gate is
+     * off.
+     */
+    private Map<String, AdvertisedIdentity> readNodeAdvertisements(String groupId)
+            throws ClusterCoordinationException {
+        Map<String, AdvertisedIdentity> advertisements = new HashMap<>();
+        if (!advertisementReadsEnabled) {
+            return advertisements;
+        }
+        Connection connection = null;
+        PreparedStatement preparedStatement = null;
+        ResultSet resultSet = null;
+        try {
+            connection = getConnection();
+            preparedStatement = connection.prepareStatement(queryManager.getQuery(
+                    DBQueries.GET_NODE_ADVERTISEMENTS));
+            preparedStatement.setString(1, groupId);
+            resultSet = preparedStatement.executeQuery();
+            while (resultSet.next()) {
+                advertisements.put(resultSet.getString(1),
+                        new AdvertisedIdentity(resultSet.getLong(2), resultSet.getString(3)));
+            }
+        } catch (SQLException e) {
+            throw new ClusterCoordinationException("Error occurred while "
+                    + RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS, e);
+        } finally {
+            close(resultSet, RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS);
+            close(preparedStatement, RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS);
+            close(connection, RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS);
+        }
+        return advertisements;
+    }
+
+    /**
+     * Reads one node's advertised (window, boot id). Null when the node has no advertisement row or
+     * the gate is off.
+     */
+    private AdvertisedIdentity readNodeAdvertisement(String groupId, String nodeId)
+            throws ClusterCoordinationException {
+        if (!advertisementReadsEnabled) {
+            return null;
+        }
+        Connection connection = null;
+        PreparedStatement preparedStatement = null;
+        ResultSet resultSet = null;
+        try {
+            connection = getConnection();
+            preparedStatement = connection.prepareStatement(queryManager.getQuery(
+                    DBQueries.GET_NODE_ADVERTISEMENT));
+            preparedStatement.setString(1, groupId);
+            preparedStatement.setString(2, nodeId);
+            resultSet = preparedStatement.executeQuery();
+            if (resultSet.next()) {
+                return new AdvertisedIdentity(resultSet.getLong(1), resultSet.getString(2));
+            }
+            return null;
+        } catch (SQLException e) {
+            throw new ClusterCoordinationException("Error occurred while "
+                    + RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS, e);
+        } finally {
+            close(resultSet, RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS);
+            close(preparedStatement, RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS);
+            close(connection, RDBMSConstantUtils.TASK_READ_NODE_ADVERTISEMENTS);
+        }
+    }
+
+    /**
+     * Reads one node's advertised heartbeat window. 0 when the node has no advertisement row or the
+     * gate is off — the judge falls back to its local window.
+     */
+    public long getAdvertisedHeartbeatWindow(String groupId, String nodeId) throws ClusterCoordinationException {
+        AdvertisedIdentity advertised = readNodeAdvertisement(groupId, nodeId);
+        return advertised == null ? 0 : advertised.heartbeatWindow;
     }
 
     @Override
@@ -614,6 +766,14 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
             close(preparedStatement, RDBMSConstantUtils.TASK_GET_ALL_QUEUES);
             close(connection, RDBMSConstantUtils.TASK_GET_ALL_QUEUES);
         }
+        if (nodeDetail != null) {
+            // Heartbeat Advertise: fresh in-memory join by NODE_ID, like getAllNodeData
+            AdvertisedIdentity advertised = readNodeAdvertisement(groupId, nodeId);
+            if (advertised != null) {
+                nodeDetail.setHeartbeatWindow(advertised.heartbeatWindow);
+                nodeDetail.setAdvertisedBootId(advertised.bootId);
+            }
+        }
         if (log.isDebugEnabled()) {
             log.debug("getting node data of node " + StringUtil.removeCRLFCharacters(nodeId) +
                       " executed successfully");
@@ -623,10 +783,26 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
 
     @Override
     public void removeNode(String nodeId, String groupId) throws ClusterCoordinationException {
+        removeNode(nodeId, groupId, null);
+    }
+
+    /**
+     * Removes a node's heartbeat row and, when an advertisement BOOT_ID was observed at judgment
+     * time, that advertisement row — conditioned on the OBSERVED BOOT_ID, so a slow evictor can never
+     * erase a restarted successor's live lease.
+     *
+     * @param nodeId                    node id of the evicted node
+     * @param groupId                   group id of the evicted node
+     * @param observedAdvertisementBootId the BOOT_ID observed on the node's advertisement row at
+     *                                  judgment time, or null to skip the advertisement cleanup
+     */
+    public void removeNode(String nodeId, String groupId, String observedAdvertisementBootId)
+            throws ClusterCoordinationException {
         Connection connection = null;
         boolean isRolledBack = false; // Flag to track if rollback has occurred
         boolean isTransactionSuccessful = false;
         PreparedStatement preparedStatement = null;
+        PreparedStatement advertisementDelete = null;
         try {
             connection = getConnection();
             preparedStatement = connection.prepareStatement(queryManager.getQuery(
@@ -634,6 +810,14 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
             preparedStatement.setString(1, nodeId);
             preparedStatement.setString(2, groupId);
             preparedStatement.executeUpdate();
+            if (observedAdvertisementBootId != null) {
+                advertisementDelete = connection.prepareStatement(queryManager.getQuery(
+                        DBQueries.DELETE_NODE_ADVERTISEMENT_OF_BOOT));
+                advertisementDelete.setString(1, groupId);
+                advertisementDelete.setString(2, nodeId);
+                advertisementDelete.setString(3, observedAdvertisementBootId);
+                advertisementDelete.executeUpdate();
+            }
             commitTransactionIfNotInterrupted(connection);
             isTransactionSuccessful = true;
             if (log.isDebugEnabled()) {
@@ -651,6 +835,7 @@ public class RDBMSCommunicationBusContextImpl implements CommunicationBusContext
                 rollback(connection, RDBMSConstantUtils.TASK_REMOVE_NODE_HEARTBEAT);
                 log.warn("Transaction rolled back for task: " + RDBMSConstantUtils.TASK_REMOVE_NODE_HEARTBEAT);
             }
+            close(advertisementDelete, RDBMSConstantUtils.TASK_REMOVE_NODE_HEARTBEAT);
             close(preparedStatement, RDBMSConstantUtils.TASK_REMOVE_NODE_HEARTBEAT);
             close(connection, RDBMSConstantUtils.TASK_REMOVE_NODE_HEARTBEAT);
         }

@@ -24,13 +24,16 @@ import org.wso2.micro.integrator.coordination.ClusterCoordinator;
 import org.wso2.micro.integrator.ntask.coordination.TaskCoordinationException;
 import org.wso2.micro.integrator.ntask.coordination.task.CoordinatedTask;
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
+import org.wso2.micro.integrator.ntask.coordination.task.store.connector.RDMBSConnector;
 import org.wso2.micro.integrator.ntask.coordination.task.util.HotDeploymentWaveWaiter;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTaskManager;
 import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
 import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The class which is responsible for cleaning the task store. This will remove the tasks if they are invalid and
@@ -46,6 +49,12 @@ public class TaskStoreCleaner {
     private TaskStore taskStore;
     private ScheduledTaskManager taskManager;
     private final boolean taskDeleteBarrierEnabled;
+    // names that qualified for invalid-task removal on the previous sweep. The memory is only valid
+    // between CONSECUTIVE sweeps of one leadership term — after a gap (lost leadership, long stall)
+    // it is discarded rather than voiding the one-pass grace for a row reopened in the meantime.
+    private static final long SWEEP_MEMORY_VALIDITY_MILLIS = 60_000;
+    private final Set<String> invalidTaskSweepCandidates = new HashSet<>();
+    private long lastInvalidTaskSweepAt;
 
     /**
      * Constructor.
@@ -150,6 +159,26 @@ public class TaskStoreCleaner {
         for (CoordinatedTask task : tasksList) {
             tasksToDelete.add(task.getTaskName());
         }
+        if (TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            // One pass of grace: an unassigned row absent from this leader's own inventory may be a
+            // just-reopened registration on another node that the resolver has not assigned yet.
+            // Delete only names that also qualified on the previous sweep — a genuine orphan still
+            // qualifies then, while a legitimate row is assigned within a cycle and drops out.
+            long now = System.currentTimeMillis();
+            if (now - lastInvalidTaskSweepAt > SWEEP_MEMORY_VALIDITY_MILLIS) {
+                invalidTaskSweepCandidates.clear();
+            }
+            lastInvalidTaskSweepAt = now;
+            List<String> qualifying = tasksToDelete;
+            tasksToDelete = new ArrayList<>(qualifying);
+            tasksToDelete.retainAll(invalidTaskSweepCandidates);
+            invalidTaskSweepCandidates.clear();
+            invalidTaskSweepCandidates.addAll(qualifying);
+            if (!tasksToDelete.isEmpty()) {
+                LOG.info("Invalid-task sweep removing task row(s) " + tasksToDelete + ": not deployed on this "
+                        + "leader and unassigned for two consecutive sweeps.");
+            }
+        }
         List<String> skippedTasks = taskStore.deleteTasksIfStateNotMatch(tasksToDelete, DELETE_PENDING_STATE);
         for (String skippedTask : skippedTasks) {
             LOG.info("Skipping invalid task cleanup for task [" + skippedTask + "] because it is in ["
@@ -168,6 +197,11 @@ public class TaskStoreCleaner {
      */
     private void recoverExpiredOrAbandonedDeleteBarriers(List<String> allNodesAvailableInCluster)
             throws TaskCoordinationException {
+
+        if (TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            recoverInFlightDeleteBarriersClassified();
+            return;
+        }
         List<String> recoveredTaskNames = taskStore.recoverExpiredOrAbandonedDeleteBarriers(allNodesAvailableInCluster,
                 System.currentTimeMillis());
         if (recoveredTaskNames.isEmpty()) {
@@ -180,6 +214,42 @@ public class TaskStoreCleaner {
             }
             taskStore.addTaskIfNotExist(taskName);
             LOG.info("Recovery flow reinitialized coordinated task row for task [" + taskName
+                    + "] after delete barrier recovery.");
+        }
+    }
+
+    /**
+     * Hardened recovery: re-classifies every in-flight wave each cycle through the single guarded
+     * finalize shared with the leader path (the stock pendingOnly finalize is gone from this flow); a
+     * LIVE holdout leaves the SAME wave OPEN with its collected acks. The re-add loop keeps its
+     * shipped shape, but the call site is the claim-status-only repair — parked names are not
+     * "missing"; the park's retry is the doorway itself, run by the deploying side, which does hold
+     * the artifact.
+     */
+    private void recoverInFlightDeleteBarriersClassified() throws TaskCoordinationException {
+
+        RDMBSConnector.BarrierRecoveryReport report = taskStore.recoverInFlightDeleteBarriersClassified(
+                clusterCoordinator.getThisNodeId(), clusterCoordinator.getHeartbeatMaxRetryInterval(),
+                System.currentTimeMillis());
+        if (report.isLiveHoldoutOnLocalWave()) {
+            ScheduledTaskManager.setSkipWaitHint("the cleaner classified a live holdout on a wave this node "
+                    + "initiated or joined.");
+        }
+        List<String> recoveredTaskNames = report.getFinalizedTasks();
+        if (recoveredTaskNames.isEmpty()) {
+            return;
+        }
+        ScheduledTaskManager.clearSkipWaitHint();
+        List<String> deployedCoordinatedTasks = taskManager.getAllCoordinatedTasksDeployed();
+        for (String taskName : recoveredTaskNames) {
+            if (!deployedCoordinatedTasks.contains(taskName)) {
+                continue;
+            }
+            if (taskManager.isParked(taskName)) {
+                continue;
+            }
+            taskStore.repairMissingTaskRow(taskName);
+            LOG.info("Recovery flow ran the claim-status-only repair for task [" + taskName
                     + "] after delete barrier recovery.");
         }
     }

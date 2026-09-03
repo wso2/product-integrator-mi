@@ -46,10 +46,12 @@ import org.wso2.micro.integrator.ntask.common.TaskException;
 import org.wso2.micro.integrator.ntask.coordination.TaskCoordinationException;
 import org.wso2.micro.integrator.ntask.coordination.task.CoordinatedTask;
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
+import org.wso2.micro.integrator.ntask.core.BootPassHandle;
 import org.wso2.micro.integrator.ntask.core.TaskInfo;
 import org.wso2.micro.integrator.ntask.core.TaskManager;
 import org.wso2.micro.integrator.ntask.core.TaskRepository;
 import org.wso2.micro.integrator.ntask.core.TaskUtils;
+import org.wso2.micro.integrator.ntask.core.internal.DataHolder;
 import org.wso2.micro.integrator.ntask.core.internal.TasksDSComponent;
 
 import java.util.Collections;
@@ -73,15 +75,24 @@ public abstract class AbstractQuartzTaskManager implements TaskManager {
      */
     private static Map<String, LocalTaskActionListener> localTaskActionListeners = new HashMap<>();
 
+    protected static final String FENCED_WRITE_REASON = "FENCED_WRITE";
+
     private TaskRepository taskRepository;
     private Scheduler scheduler;
     private TaskStore taskStore;
+
+    /**
+     * Episode limiter for zero-row fenced state writes — field evidence, never silence and never a
+     * storm.
+     */
+    protected final EpisodeLog fencedWriteEpisodeLog;
 
     public AbstractQuartzTaskManager(TaskRepository taskRepository, TaskStore taskStore) throws TaskException {
 
         this.taskRepository = taskRepository;
         this.scheduler = TasksDSComponent.getScheduler();
         this.taskStore = taskStore;
+        this.fencedWriteEpisodeLog = new EpisodeLog(DataHolder.getInstance().getLocalNodeId());
         try {
             Matcher<TriggerKey> tenantTaskTypeGroupMatcher = GroupMatcher.groupEquals(this.getTenantTaskGroup());
             this.getScheduler().getListenerManager().addTriggerListener(
@@ -210,13 +221,16 @@ public abstract class AbstractQuartzTaskManager implements TaskManager {
         return dataMap;
     }
 
-    protected synchronized void scheduleAllTasks() throws TaskException {
+    protected synchronized void scheduleAllTasks(BootPassHandle handle) throws TaskException {
         List<TaskInfo> tasks = this.getTaskRepository().getAllTasks();
         for (TaskInfo task : tasks) {
             try {
-                this.handleTask(task.getName());
+                this.handleTask(task.getName(), handle);
             } catch (Exception e) {
                 log.error("Error in scheduling task: " + e.getMessage(), e);
+                if (handle != null) {
+                    handle.recordFailure(task.getName(), e);
+                }
             }
         }
     }
@@ -227,6 +241,19 @@ public abstract class AbstractQuartzTaskManager implements TaskManager {
     }
 
     protected synchronized void scheduleLocalTask(String taskName, boolean paused) throws TaskException {
+
+        this.scheduleLocalTask(taskName, paused, null);
+    }
+
+    /**
+     * Schedules a local task, stamping the coordinated fence tuple into the JobDataMap at scheduling
+     * time when one is supplied (the epoch stamped is the one just published by the scheduling
+     * transaction, so a job and its claim-row epoch are born matching).
+     *
+     * @param fenceData the immutable coordinated marker + fence tuple, or null for plain local tasks
+     */
+    protected synchronized void scheduleLocalTask(String taskName, boolean paused, JobDataMap fenceData)
+            throws TaskException {
 
         TaskInfo taskInfo = this.getTaskRepository().getTask(taskName);
         String taskGroup = this.getTenantTaskGroup();
@@ -241,8 +268,12 @@ public abstract class AbstractQuartzTaskManager implements TaskManager {
         Class<? extends Job> jobClass = taskInfo.getTriggerInfo().isDisallowConcurrentExecution() ?
                 NonConcurrentTaskQuartzJobAdapter.class :
                 TaskQuartzJobAdapter.class;
+        JobDataMap jobDataMap = this.getJobDataMapFromTaskInfo(taskInfo);
+        if (fenceData != null) {
+            jobDataMap.putAll(fenceData);
+        }
         JobDetail job = JobBuilder.newJob(jobClass).withIdentity(taskName, taskGroup).usingJobData(
-                this.getJobDataMapFromTaskInfo(taskInfo)).build();
+                jobDataMap).build();
         Trigger trigger = this.getTriggerFromInfo(taskName, taskGroup, taskInfo.getTriggerInfo());
         try {
             this.getScheduler().scheduleJob(job, trigger);
@@ -252,6 +283,33 @@ public abstract class AbstractQuartzTaskManager implements TaskManager {
             log.info("Task scheduled: [" + this.getTaskType() + "][" + taskName + "]" + (paused ? " [Paused]." : "."));
         } catch (SchedulerException e) {
             throw new TaskException("Error in scheduling task with name: " + taskName, TaskException.Code.UNKNOWN, e);
+        }
+    }
+
+    /**
+     * Replaces a previously scheduled job's JobDetail with one carrying the just-published fence
+     * tuple. resumeLocalTask reuses the old JobDataMap — a resume without this rebuild leaves a stale
+     * epoch in the job and vetoes the task permanently.
+     */
+    protected synchronized void rebuildCoordinatedJobDetail(String taskName, JobDataMap fenceData)
+            throws TaskException {
+
+        String taskGroup = this.getTenantTaskGroup();
+        try {
+            JobDetail existing = this.getScheduler().getJobDetail(new JobKey(taskName, taskGroup));
+            if (existing == null) {
+                throw new TaskException("Non-existing task for fence rebuild with name: " + taskName,
+                        TaskException.Code.NO_TASK_EXISTS);
+            }
+            JobDataMap merged = new JobDataMap(existing.getJobDataMap());
+            merged.putAll(fenceData);
+            // storeDurably: the runtime scheduler's 2-arg addJob refuses non-durable jobs even on
+            // replace; the job keeps its triggers, durability only lets the replace store it
+            JobDetail rebuilt = existing.getJobBuilder().usingJobData(merged).storeDurably().build();
+            this.getScheduler().addJob(rebuilt, true);
+        } catch (SchedulerException e) {
+            throw new TaskException("Error in rebuilding the job detail of task: " + taskName,
+                    TaskException.Code.UNKNOWN, e);
         }
     }
 
@@ -439,8 +497,23 @@ public abstract class AbstractQuartzTaskManager implements TaskManager {
                     TaskUtils.setTaskFinished(getTaskRepository(), taskName, true);
                     if (getAllCoordinatedTasksDeployed().contains(taskName)) {
                         removeTaskFromLocallyRunningTaskList(taskName);
-                        taskStore.updateTaskState(Collections.singletonList(taskName),
-                                                  CoordinatedTask.States.COMPLETED);
+                        JobDataMap data = jobExecutionContext.getMergedJobDataMap();
+                        if (data.getBoolean(CoordinatedTaskTriggerListener.JOB_DATA_COORDINATED)) {
+                            // Fenced Writes: the running job's own COMPLETED transition carries "…and
+                            // I still own this task" — the tuple the dispatch CAS checks
+                            if (!taskStore.updateTaskStateFenced(taskName, CoordinatedTask.States.COMPLETED,
+                                    DataHolder.getInstance().getLocalNodeId(),
+                                    data.getInt(CoordinatedTaskTriggerListener.JOB_DATA_INCARNATION),
+                                    data.getLong(CoordinatedTaskTriggerListener.JOB_DATA_OWNER_EPOCH),
+                                    data.getString(CoordinatedTaskTriggerListener.JOB_DATA_OWNER_BOOT_ID))) {
+                                fencedWriteEpisodeLog.episodeWarn(taskName, FENCED_WRITE_REASON,
+                                        "State write [" + CoordinatedTask.States.COMPLETED + "] for task ["
+                                                + taskName + "] matched zero rows — fenced or already-applied.");
+                            }
+                        } else {
+                            taskStore.updateTaskState(Collections.singletonList(taskName),
+                                                      CoordinatedTask.States.COMPLETED);
+                        }
                     }
                 } catch (TaskException | TaskCoordinationException e) {
                     log.error("Error in Finishing Task [" + trigger.getJobKey().getName() + "]: " + e.getMessage(), e);

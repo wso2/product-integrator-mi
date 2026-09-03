@@ -37,6 +37,8 @@ public class RDBMSConstantUtils {
     public static final String TASK_UPDATE_COORDINATOR_HEARTBEAT = "updating coordinator heartbeat";
     public static final String TASK_GET_COORDINATOR_INFORMATION = "reading coordinator information";
     public static final String TASK_REMOVE_COORDINATOR = "removing coordinator heartbeat";
+    public static final String TASK_REMOVE_COORDINATOR_SELF = "removing own coordinator row";
+    public static final String TASK_READ_NODE_ADVERTISEMENTS = "reading node advertisements";
     public static final String TASK_UPDATE_NODE_HEARTBEAT = "updating node heartbeat";
     public static final String TASK_CREATE_NODE_HEARTBEAT = "creating node heartbeat";
     public static final String TASK_GET_ALL_QUEUES = "getting all queues";

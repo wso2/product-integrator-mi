@@ -18,6 +18,7 @@
 package org.wso2.micro.integrator.ntask.core;
 
 import org.wso2.micro.core.ServerStartupObserver;
+import org.wso2.micro.integrator.ntask.core.internal.TasksDSComponent;
 import org.wso2.micro.integrator.ntask.core.service.TaskService;
 
 /**
@@ -43,6 +44,18 @@ public class TaskStartupHandler implements ServerStartupObserver {
 
     @Override
     public void completedServerStartup() {
-        this.getTaskService().serverInitialized();
+        BootLeaseController bootLeaseController = TasksDSComponent.getBootLeaseController();
+        if (bootLeaseController == null) {
+            // Stock nodes retain the original startup enumeration. Refusing nodes also enumerate local tasks,
+            // while the coordinated-task guard in ScheduledTaskManager prevents their registration and scheduling.
+            this.getTaskService().serverInitialized();
+            return;
+        }
+        String bootId = bootLeaseController.bootId();  // Bind completion to the generation enumerated below.
+        try {
+            this.getTaskService().serverInitialized();
+        } finally {
+            bootLeaseController.completeBootPass(bootId); // A stale generation is logged and ignored.
+        }
     }
 }

@@ -21,10 +21,14 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.wso2.micro.integrator.ntask.common.TaskException;
 import org.wso2.micro.integrator.ntask.coordination.task.store.TaskStore;
+import org.wso2.micro.integrator.ntask.core.BootLeaseController;
+import org.wso2.micro.integrator.ntask.core.BootPassHandle;
 import org.wso2.micro.integrator.ntask.core.TaskManager;
 import org.wso2.micro.integrator.ntask.core.TaskManagerFactory;
 import org.wso2.micro.integrator.ntask.core.TaskManagerId;
 import org.wso2.micro.integrator.ntask.core.impl.standalone.ScheduledTasksManagerFactory;
+import org.wso2.micro.integrator.ntask.core.internal.TaskHandlingConfigUtils;
+import org.wso2.micro.integrator.ntask.core.internal.TasksDSComponent;
 import org.wso2.micro.integrator.ntask.core.service.TaskService;
 
 import java.util.HashSet;
@@ -71,10 +75,29 @@ public class TaskServiceImpl implements TaskService {
         if (log.isDebugEnabled()) {
             log.debug("Initializing task managers [" + taskType + "]");
         }
-        List<TaskManager> startupTms = this.getTaskManagerFactory().getStartupSchedulingTaskManagersForType(taskType,
-                                                                                                            taskStore);
-        for (TaskManager tm : startupTms) {
-            tm.initStartupTasks();
+        // BOOT_PASS is per-type-first-pass, decided by the controller: the holder answers ARMED, the
+        // controller (read at call time; null on STOCK/REFUSING) hands out a generation-bound handle
+        // on the type's first pass and null thereafter. The handle threads as an explicit parameter.
+        BootPassHandle handle = null;
+        if (TaskHandlingConfigUtils.isCoordinationHardeningEnabled()) {
+            BootLeaseController controller = TasksDSComponent.getBootLeaseController();
+            if (controller != null) {
+                handle = controller.beginTypeBootPass(taskType);
+            }
+        }
+        try {
+            List<TaskManager> startupTms = this.getTaskManagerFactory()
+                    .getStartupSchedulingTaskManagersForType(taskType, taskStore);
+            for (TaskManager tm : startupTms) {
+                tm.initStartupTasks(handle);
+            }
+        } catch (TaskException | RuntimeException e) {
+            // a type-level failure is recorded as type:<taskType> and then RETHROWN — shipped
+            // propagation unchanged
+            if (handle != null) {
+                handle.recordFailure("type:" + taskType, e);
+            }
+            throw e;
         }
     }
 
