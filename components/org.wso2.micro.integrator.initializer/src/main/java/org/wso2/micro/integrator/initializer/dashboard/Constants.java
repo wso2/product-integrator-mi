@@ -60,7 +60,9 @@ public class Constants {
     public static final String FORWARD_SLASH = "/";
     public static final String COLON = ":";
     public static final String HTTPS_PREFIX = "https://";
+    public static final String HTTP_PREFIX = "http://";
     public static final String MANAGEMENT = "management";
+    public static final String MANAGEMENT_API_NAME = "ManagementApi";
     
     // ICP Endpoints
     public static final String ICP_HEARTBEAT_ENDPOINT = "/icp/heartbeat";
