@@ -215,8 +215,8 @@ public class SequenceResource extends APIResource {
             mediatorTypes[i] = mediators.get(i).getType();
         }
         sequenceObject.put("mediators", mediatorTypes);
-        sequenceObject.put(Constants.SYNAPSE_CONFIGURATION,
-                new SequenceMediatorSerializer().serializeSpecificMediator(sequenceMediator));
+        sequenceObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+                new SequenceMediatorSerializer().serializeSpecificMediator(sequenceMediator)));
 
         return sequenceObject;
     }

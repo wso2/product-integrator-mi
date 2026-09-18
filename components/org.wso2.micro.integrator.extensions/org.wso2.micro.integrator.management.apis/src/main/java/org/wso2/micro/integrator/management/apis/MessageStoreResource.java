@@ -34,7 +34,6 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,8 +41,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.wso2.micro.integrator.management.apis.Constants.PASSWORD;
-import static org.wso2.micro.integrator.management.apis.Constants.PASSWORD_MASKED_VALUE;
 import static org.wso2.micro.integrator.management.apis.Constants.SEARCH_KEY;
 
 /**
@@ -200,17 +197,10 @@ public class MessageStoreResource implements MiApiResource {
         jsonObject.put(Constants.NAME, messageStore.getName());
         jsonObject.put(CONTAINER_ATTRIBUTE, messageStore.getArtifactContainerName());
         jsonObject.put(FILE_NAME_ATTRIBUTE, messageStore.getFileName());
-        Map<String, Object> parameters = new HashMap<>(messageStore.getParameters());
-        parameters.replaceAll((name, value) -> {
-            if (name.contains(PASSWORD)) {
-                return PASSWORD_MASKED_VALUE;
-            }
-            return value;
-        });
-        jsonObject.put(PROPERTIES_ATTRIBUTE, parameters);
+        jsonObject.put(PROPERTIES_ATTRIBUTE, Utils.maskPasswordParameters(messageStore.getParameters()));
         jsonObject.put(STORE_SIZE_ATTRIBUTE, messageStore.size());
-        jsonObject.put(Constants.SYNAPSE_CONFIGURATION,
-                       MessageStoreSerializer.serializeMessageStore(null, messageStore, true));
+        jsonObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+                MessageStoreSerializer.serializeMessageStore(null, messageStore, true)));
         return jsonObject;
     }
 }

@@ -245,7 +245,8 @@ public class DataServiceResource extends APIResource {
             dataServiceInfo.setDataSources(getDataSources(dataService));
             dataServiceInfo.setResources(getResources(dataService));
             dataServiceInfo.setOperations(getOperations(dataService));
-            dataServiceInfo.setConfiguration(DataServiceSerializer.serializeDataService(dataService, true).toString());
+            dataServiceInfo.setConfiguration(Utils.maskPasswordsInConfiguration(
+                    DataServiceSerializer.serializeDataService(dataService, true)).toString());
             String stringPayload = new Gson().toJson(dataServiceInfo);
             Utils.setJsonPayLoad(axis2MessageContext, new JSONObject(stringPayload));
         }
@@ -334,7 +335,11 @@ public class DataServiceResource extends APIResource {
             DataSourceInfo dataSource = new DataSourceInfo();
             dataSource.setDataSourceId(config.getConfigId());
             dataSource.setDataSourceType(config.getType());
-            dataSource.setDataSourceProperties(config.getProperties());
+            // maskPasswordParameters returns a map of objects, whereas a data source property is always a string.
+            Map<String, String> maskedProperties = new LinkedHashMap<>();
+            config.getProperties().forEach((propertyName, value) ->
+                    maskedProperties.put(propertyName, (String) Utils.maskSecretValue(propertyName, value)));
+            dataSource.setDataSourceProperties(maskedProperties);
             dataSources.add(dataSource);
         });
         return dataSources;

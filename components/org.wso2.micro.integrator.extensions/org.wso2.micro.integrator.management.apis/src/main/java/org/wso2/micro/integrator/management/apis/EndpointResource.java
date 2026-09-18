@@ -234,8 +234,9 @@ public class EndpointResource implements MiApiResource {
      */
     private JSONObject getEndpointAsJson(Endpoint endpoint) {
 
-        JSONObject endpointObject = endpoint.getJsonRepresentation();
-        OMElement synapseConfiguration = EndpointSerializer.getElementFromEndpoint(endpoint);
+        JSONObject endpointObject = Utils.maskSecretsInJson(endpoint.getJsonRepresentation());
+        OMElement synapseConfiguration =
+                Utils.maskPasswordsInConfiguration(EndpointSerializer.getElementFromEndpoint(endpoint));
         endpointObject.put(Constants.SYNAPSE_CONFIGURATION, synapseConfiguration);
         endpointObject.put(IS_ACTIVE, isEndpointActive(endpoint));
         if (((AbstractEndpoint) endpoint).getDefinition() != null) {

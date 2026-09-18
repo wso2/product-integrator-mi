@@ -221,11 +221,11 @@ public class MessageProcessorResource extends APIResource {
         jsonBody.put(TYPE_PROPERTY, getMessageProcessorType(messageProcessor));
         jsonBody.put(CONTAINER_PROPERTY, messageProcessor.getArtifactContainerName());
         jsonBody.put(FILE_NAME_PROPERTY, messageProcessor.getFileName());
-        jsonBody.put(PARAMETER_PROPERTY, messageProcessor.getParameters());
+        jsonBody.put(PARAMETER_PROPERTY, Utils.maskPasswordParameters(messageProcessor.getParameters()));
         jsonBody.put(MESSAGE_STORE_PROPERTY, messageProcessor.getMessageStoreName());
         jsonBody.put(STATUS, getProcessorState(messageProcessor.isDeactivated()));
-        jsonBody.put(Constants.SYNAPSE_CONFIGURATION,
-                MessageProcessorSerializer.serializeMessageProcessor(null, messageProcessor));
+        jsonBody.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+                MessageProcessorSerializer.serializeMessageProcessor(null, messageProcessor)));
 
         return jsonBody;
     }

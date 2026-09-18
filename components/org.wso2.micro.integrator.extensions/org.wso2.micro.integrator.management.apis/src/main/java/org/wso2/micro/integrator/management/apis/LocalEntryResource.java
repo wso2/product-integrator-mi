@@ -38,8 +38,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import javax.xml.namespace.QName;
-
 import static org.wso2.micro.integrator.management.apis.Constants.LIST;
 import static org.wso2.micro.integrator.management.apis.Constants.SEARCH_KEY;
 
@@ -56,8 +54,6 @@ public class LocalEntryResource implements MiApiResource {
     private static final String TYPE_ATTRIBUTE= "type";
     private static final String VALUE_ATTRIBUTE= "value";
     private static final String DESCRIPTION_ATTRIBUTE= "description";
-    private static final String PWD_MASKED_VALUE = "*****";
-    private static final String PWD_ELEMENT = "password";
 
     public LocalEntryResource() {
         methods = new HashSet<>(1);
@@ -217,29 +213,25 @@ public class LocalEntryResource implements MiApiResource {
         JSONObject jsonObject = new JSONObject();
         jsonObject.put(Constants.NAME, localEntry.getKey());
         jsonObject.put(TYPE_ATTRIBUTE, getEntryType(localEntry));
-        jsonObject.put(VALUE_ATTRIBUTE, hasPasswordElement(localEntry) ? maskPasswordElement(localEntry) :
-                localEntry.getValue());
+        jsonObject.put(VALUE_ATTRIBUTE, maskLocalEntryValue(localEntry));
         jsonObject.put(DESCRIPTION_ATTRIBUTE, localEntry.getDescription());
         return jsonObject;
     }
 
-    private boolean hasPasswordElement(Entry localEntry) {
+    /**
+     * Returns the value of the given local entry with its secrets masked. An inline value is masked as a whole
+     * configuration, since a connector keeps its connection parameters in a local entry and those carry credentials
+     * such as an access token or an api key at any depth.
+     *
+     * @param localEntry local entry to be inspected
+     * @return the masked value of the local entry
+     */
+    private Object maskLocalEntryValue(Entry localEntry) {
 
-        if (localEntry.getValue() instanceof OMElement) {
-            OMElement element = (OMElement) localEntry.getValue();
-            OMElement password = element.getFirstChildWithName(new QName(
-                    SynapseConstants.SYNAPSE_NAMESPACE, PWD_ELEMENT));
-            return password != null;
+        Object value = localEntry.getValue();
+        if (value instanceof OMElement) {
+            return Utils.maskPasswordsInConfiguration((OMElement) value);
         }
-        return false;
-    }
-
-    private OMElement maskPasswordElement(Entry localEntry) {
-
-        OMElement element = ((OMElement) localEntry.getValue()).cloneOMElement();
-        OMElement password = element.getFirstChildWithName(new QName(
-                SynapseConstants.SYNAPSE_NAMESPACE, PWD_ELEMENT));
-        password.setText(PWD_MASKED_VALUE);
-        return element;
+        return Utils.maskSecretValue(localEntry.getKey(), value);
     }
 }
