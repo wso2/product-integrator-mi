@@ -28,7 +28,12 @@ import org.apache.synapse.inbound.InboundEndpoint;
 import org.junit.Assert;
 import org.junit.Test;
 
+import org.apache.synapse.config.Entry;
+import org.wso2.config.mapper.ConfigParser;
+
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -117,7 +122,7 @@ public class UtilsSecretMaskingTest {
                         + "<tokenUrl>https://login.example.com/services/oauth2/token</tokenUrl>"
                         + "</salesforce.init>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(connection).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(connection).toString();
 
         Assert.assertFalse("No credential of the connection should be returned",
                 maskedConfiguration.contains(SECRET));
@@ -137,7 +142,7 @@ public class UtilsSecretMaskingTest {
         parameters.put("java.naming.security.credentials", SECRET);
         parameters.put("clientSecret", SECRET);
 
-        Map<String, Object> maskedParameters = Utils.maskPasswordParameters(parameters);
+        Map<String, Object> maskedParameters = Utils.maskSecretParameters(parameters);
 
         Assert.assertEquals("The JNDI credentials should be masked",
                 PASSWORD_MASKED_VALUE, maskedParameters.get("java.naming.security.credentials"));
@@ -148,12 +153,12 @@ public class UtilsSecretMaskingTest {
     }
 
     @Test
-    public void testMaskPasswordParametersDoesNotModifyTheGivenMap() {
+    public void testMaskSecretParametersDoesNotModifyTheGivenMap() {
 
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("solace.password", SECRET);
 
-        Utils.maskPasswordParameters(parameters);
+        Utils.maskSecretParameters(parameters);
 
         Assert.assertEquals("The parameter map used at runtime should not be modified",
                 SECRET, parameters.get("solace.password"));
@@ -166,7 +171,7 @@ public class UtilsSecretMaskingTest {
         parameters.put("transport.vfs.FileURI", "vfs:sftp://sftpuser:" + SECRET + "@localhost:22/in");
         parameters.put("store.jdbc.connection.url", "jdbc:postgresql://dbuser:" + SECRET + "@localhost:5432/mi");
 
-        Map<String, Object> maskedParameters = Utils.maskPasswordParameters(parameters);
+        Map<String, Object> maskedParameters = Utils.maskSecretParameters(parameters);
 
         String maskedFileUri = (String) maskedParameters.get("transport.vfs.FileURI");
         Assert.assertFalse("The credentials of the file uri should not be returned",
@@ -211,7 +216,7 @@ public class UtilsSecretMaskingTest {
                         + "</parameters>"
                         + "</inboundEndpoint>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(inboundEndpoint).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(inboundEndpoint).toString();
 
         Assert.assertFalse("A password serialized as a child element should be removed",
                 maskedConfiguration.contains(SECRET));
@@ -229,7 +234,7 @@ public class UtilsSecretMaskingTest {
                         + "</parameters>"
                         + "</inboundEndpoint>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(inboundEndpoint).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(inboundEndpoint).toString();
 
         Assert.assertTrue("The registry key should be preserved",
                 maskedConfiguration.contains("conf:/repository/password"));
@@ -250,7 +255,7 @@ public class UtilsSecretMaskingTest {
         inboundEndpoint.addParameter("solace.username", "default");
         inboundEndpoint.addParameter("solace.password", SECRET);
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(
                 InboundEndpointSerializer.serializeInboundEndpoint(inboundEndpoint)).toString();
 
         Assert.assertFalse("The serialized configuration should not contain the password",
@@ -273,7 +278,7 @@ public class UtilsSecretMaskingTest {
                         + "<clientSecret>" + SECRET + "</clientSecret></clientCredentials></oauth>"
                         + "</authentication></http></endpoint>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(endpoint).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(endpoint).toString();
 
         Assert.assertFalse("The basic auth password and the client secret should not be returned",
                 maskedConfiguration.contains(SECRET));
@@ -293,7 +298,7 @@ public class UtilsSecretMaskingTest {
                         + "<password>" + SECRET + "</password>"
                         + "</pool></connection></dblookup></sequence>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(sequence).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(sequence).toString();
 
         Assert.assertFalse("The database password should not be returned", maskedConfiguration.contains(SECRET));
         Assert.assertTrue("The database user should not be masked", maskedConfiguration.contains("dbuser"));
@@ -310,7 +315,7 @@ public class UtilsSecretMaskingTest {
                         + "<property name=\"my.status\" scope=\"default\" value=\"active\"/>"
                         + "</sequence>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(sequence).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(sequence).toString();
 
         Assert.assertFalse("A secret held by a value attribute should not be returned",
                 maskedConfiguration.contains(SECRET));
@@ -328,7 +333,7 @@ public class UtilsSecretMaskingTest {
                         + "<address uri=\"https://uriuser:" + SECRET + "@backend.example.com/service\"/>"
                         + "</endpoint>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(endpoint).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(endpoint).toString();
 
         Assert.assertFalse("The credentials of the uri should not be returned",
                 maskedConfiguration.contains(SECRET));
@@ -346,7 +351,7 @@ public class UtilsSecretMaskingTest {
                         + "vfs:sftp://sftpuser:" + SECRET + "@localhost:22/in</parameter>"
                         + "</proxy>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(proxy).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(proxy).toString();
 
         Assert.assertFalse("The credentials of the file uri should not be returned",
                 maskedConfiguration.contains(SECRET));
@@ -364,7 +369,7 @@ public class UtilsSecretMaskingTest {
                         + "vfs:sftp://sftpuser:" + secretWithAtSign + "@localhost:22/in</parameter>"
                         + "</proxy>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(proxy).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(proxy).toString();
 
         Assert.assertFalse("The credentials of the file uri should not be returned",
                 maskedConfiguration.contains(secretWithAtSign));
@@ -385,7 +390,7 @@ public class UtilsSecretMaskingTest {
                         + "<property name=\"allowCredentials\" value=\"true\"/>"
                         + "</handler></handlers></api>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(api).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(api).toString();
 
         Assert.assertTrue("The allow credentials flag of a cors handler should not be masked",
                 maskedConfiguration.contains("value=\"true\""));
@@ -401,7 +406,7 @@ public class UtilsSecretMaskingTest {
                         + "<property name=\"org.wso2.ws.dataservice.password\">" + SECRET + "</property>"
                         + "</config></data>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(dataService).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(dataService).toString();
 
         Assert.assertFalse("The password of the data service config should not be returned",
                 maskedConfiguration.contains(SECRET));
@@ -419,7 +424,7 @@ public class UtilsSecretMaskingTest {
                 "<proxy xmlns=\"http://ws.apache.org/ns/synapse\" name=\"VaultProxy\">"
                         + "<parameter name=\"transport.vfs.FileURI\">" + vaultUri + "</parameter></proxy>");
 
-        String maskedConfiguration = Utils.maskPasswordsInConfiguration(proxy).toString();
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(proxy).toString();
 
         Assert.assertTrue("A uri which resolves its secret at runtime should be left as it is",
                 maskedConfiguration.contains(vaultUri));
@@ -432,7 +437,7 @@ public class UtilsSecretMaskingTest {
                 "<proxy xmlns=\"http://ws.apache.org/ns/synapse\" name=\"VfsSecretProxy\">"
                         + "<parameter name=\"custom.password\">" + SECRET + "</parameter></proxy>");
 
-        Utils.maskPasswordsInConfiguration(proxy);
+        Utils.maskSecretsInConfiguration(proxy);
 
         Assert.assertTrue("The configuration owned by the synapse configuration should not be modified",
                 proxy.toString().contains(SECRET));
@@ -474,7 +479,7 @@ public class UtilsSecretMaskingTest {
     public void testNullConfigurationIsHandled() {
 
         Assert.assertNull("A null configuration should be returned as it is",
-                Utils.maskPasswordsInConfiguration(null));
+                Utils.maskSecretsInConfiguration(null));
     }
 
     @Test
@@ -504,6 +509,188 @@ public class UtilsSecretMaskingTest {
 
         Assert.assertEquals("A parameter which holds no secret should not be masked",
                 "MOVE", parameterValue(parameters, "transport.vfs.ActionAfterProcess"));
+    }
+
+    @Test
+    public void testSecretMaskingIsEnabledByDefault() throws Exception {
+
+        Assert.assertTrue("Secrets should be masked when the deployment holds no configuration",
+                isSecretMaskingEnabledWith(null));
+        Assert.assertTrue("Secrets should be masked when the deployment does not configure the masking",
+                isSecretMaskingEnabledWith(Collections.emptyMap()));
+    }
+
+    @Test
+    public void testSecretMaskingIsTurnedOffOnlyWhenItIsConfiguredOff() throws Exception {
+
+        Assert.assertFalse("Secrets should not be masked when the masking is turned off",
+                isSecretMaskingEnabledWith(secretMaskingConfig(Boolean.FALSE)));
+        Assert.assertFalse("The value of the masking should be accepted as a string as well",
+                isSecretMaskingEnabledWith(secretMaskingConfig("false")));
+        Assert.assertTrue("Secrets should be masked when the masking is turned on",
+                isSecretMaskingEnabledWith(secretMaskingConfig(Boolean.TRUE)));
+        Assert.assertTrue("Secrets should be masked when the value of the masking is not a boolean",
+                isSecretMaskingEnabledWith(secretMaskingConfig("yes")));
+    }
+
+    /**
+     * Reads the masking decision for the given configurations, which the server populates at startup.
+     *
+     * @param parsedConfigs the configurations to decide with
+     * @return true if the secrets of a configuration have to be masked
+     */
+    private boolean isSecretMaskingEnabledWith(Object parsedConfigs) throws Exception {
+
+        Object previousConfigs = setParsedConfigs(parsedConfigs);
+        try {
+            return Utils.isSecretMaskingEnabled();
+        } finally {
+            setParsedConfigs(previousConfigs);
+        }
+    }
+
+    @Test
+    public void testConfigurationIsReturnedAsItIsWhenSecretMaskingIsTurnedOff() throws Exception {
+
+        OMElement proxy = AXIOMUtil.stringToOM(
+                "<proxy xmlns=\"http://ws.apache.org/ns/synapse\" name=\"VfsSecretProxy\">"
+                        + "<parameter name=\"custom.password\">" + SECRET + "</parameter></proxy>");
+
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("solace.password", SECRET);
+        JSONObject endpointJson = new JSONObject();
+        endpointJson.put("clientSecret", SECRET);
+
+        Object previousConfigs = setParsedConfigs(secretMaskingConfig(Boolean.FALSE));
+        try {
+            Assert.assertTrue("The configuration should be returned as it is",
+                    Utils.maskSecretsInConfiguration(proxy).toString().contains(SECRET));
+            Assert.assertEquals("A parameter map should be returned as it is",
+                    SECRET, Utils.maskSecretParameters(parameters).get("solace.password"));
+            Assert.assertEquals("A json representation should be returned as it is",
+                    SECRET, Utils.maskSecretsInJson(endpointJson).getString("clientSecret"));
+
+            Assert.assertEquals("A parameter value should be returned as it is",
+                    SECRET, Utils.maskSecretValue("solace.password", SECRET));
+
+            Assert.assertEquals("The parameter map used at runtime should not be modified",
+                    SECRET, parameters.get("solace.password"));
+            Assert.assertTrue("The json representation cached by the artifact should not be modified",
+                    endpointJson.toString().contains(SECRET));
+        } finally {
+            setParsedConfigs(previousConfigs);
+        }
+    }
+
+    /**
+     * A parameter which is resolved through the registry is returned the same way as any other parameter, since
+     * turning the masking off returns the artifact the way the management API returned it before the secrets were
+     * masked.
+     */
+    @Test
+    public void testRegistryBackedParameterFollowsTheSettingAsAnyOtherParameter() throws Exception {
+
+        InboundEndpoint inboundEndpoint = new InboundEndpoint();
+        inboundEndpoint.setName("RegistryBackedInbound");
+        inboundEndpoint.setProtocol("http");
+        inboundEndpoint.configure(new AspectConfiguration("RegistryBackedInbound"));
+        inboundEndpoint.addParameter("registry.password", SECRET, "conf:/repository/password");
+        inboundEndpoint.addParameter("inline.password", SECRET);
+
+        JSONArray masked = convertInboundEndpointToJson(inboundEndpoint).getJSONArray("parameters");
+        Assert.assertEquals("A parameter resolved through the registry should be masked while the masking is on",
+                PASSWORD_MASKED_VALUE, parameterValue(masked, "registry.password"));
+
+        Object previousConfigs = setParsedConfigs(secretMaskingConfig(Boolean.FALSE));
+        JSONArray parameters;
+        try {
+            parameters = convertInboundEndpointToJson(inboundEndpoint).getJSONArray("parameters");
+        } finally {
+            setParsedConfigs(previousConfigs);
+        }
+
+        Assert.assertEquals("A parameter resolved through the registry should be returned as it is",
+                SECRET, parameterValue(parameters, "registry.password"));
+        Assert.assertEquals("A parameter of the inbound endpoint itself should be returned as it is",
+                SECRET, parameterValue(parameters, "inline.password"));
+    }
+
+    /**
+     * The value of a local entry is its source, therefore turning the secret masking off returns it as it is, the
+     * same way the configuration of every other artifact is returned.
+     */
+    @Test
+    public void testLocalEntryValueIsReturnedAsItIsWhenSecretMaskingIsTurnedOff() throws Exception {
+
+        Entry localEntry = new Entry("ConnectorConn");
+        localEntry.setType(Entry.INLINE_XML);
+        localEntry.setValue(AXIOMUtil.stringToOM(
+                "<salesforce.init xmlns=\"http://ws.apache.org/ns/synapse\">"
+                        + "<username>connUser</username>"
+                        + "<password>" + SECRET + "</password>"
+                        + "<accessToken>" + SECRET + "</accessToken>"
+                        + "</salesforce.init>"));
+
+        Object previousConfigs = setParsedConfigs(secretMaskingConfig(Boolean.FALSE));
+        String maskedValue;
+        try {
+            maskedValue = localEntryValue(localEntry).toString();
+        } finally {
+            setParsedConfigs(previousConfigs);
+        }
+
+        Assert.assertTrue("The password element should be returned as it is",
+                maskedValue.contains("<password>" + SECRET + "</password>"));
+        Assert.assertTrue("The access token should be returned as it is",
+                maskedValue.contains("<accessToken>" + SECRET + "</accessToken>"));
+        Assert.assertFalse("Nothing of the local entry should be masked", maskedValue.contains(PASSWORD_MASKED_VALUE));
+    }
+
+    @Test
+    public void testLocalEntryValueIsMaskedWhenSecretMaskingIsOn() throws Exception {
+
+        Entry localEntry = new Entry("ConnectorConn");
+        localEntry.setType(Entry.INLINE_XML);
+        localEntry.setValue(AXIOMUtil.stringToOM(
+                "<salesforce.init xmlns=\"http://ws.apache.org/ns/synapse\">"
+                        + "<username>connUser</username>"
+                        + "<password>" + SECRET + "</password>"
+                        + "<accessToken>" + SECRET + "</accessToken>"
+                        + "</salesforce.init>"));
+
+        String maskedValue = localEntryValue(localEntry).toString();
+
+        Assert.assertFalse("No credential of the local entry should be returned", maskedValue.contains(SECRET));
+        Assert.assertTrue("The user of the connection should not be masked", maskedValue.contains("connUser"));
+    }
+
+    private Map<String, Object> secretMaskingConfig(Object value) {
+
+        Map<String, Object> parsedConfigs = new LinkedHashMap<>();
+        parsedConfigs.put(Constants.SECRET_MASKING_ENABLED, value);
+        return parsedConfigs;
+    }
+
+    /**
+     * Sets the parsed deployment.toml configurations, which are otherwise populated by the server at startup.
+     *
+     * @param parsedConfigs the configurations to set
+     * @return the configurations which were set before, so that they can be restored
+     */
+    private Object setParsedConfigs(Object parsedConfigs) throws Exception {
+
+        Field field = ConfigParser.class.getDeclaredField("parsedConfigs");
+        field.setAccessible(true);
+        Object previousConfigs = field.get(null);
+        field.set(null, parsedConfigs);
+        return previousConfigs;
+    }
+
+    private Object localEntryValue(Entry localEntry) throws Exception {
+
+        Method masking = LocalEntryResource.class.getDeclaredMethod("maskLocalEntryValue", Entry.class);
+        masking.setAccessible(true);
+        return masking.invoke(new LocalEntryResource(), localEntry);
     }
 
     /**

@@ -291,8 +291,8 @@ public class TaskResource extends APIResource {
             taskObject.put("triggerInterval", String.valueOf(task.getInterval()));
         }
         taskObject.put("triggerType", triggerType);
-        taskObject.put("properties", Utils.maskPasswordParameters(getProperties(task.getXmlProperties())));
-        taskObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+        taskObject.put("properties", Utils.maskSecretParameters(getProperties(task.getXmlProperties())));
+        taskObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
                 TaskDescriptionSerializer.serializeTaskDescription(null, task)));
 
         return taskObject;

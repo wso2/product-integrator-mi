@@ -230,7 +230,7 @@ public class InboundEndpointResource extends APIResource {
 
         String tracingState = inboundEndpoint.getAspectConfiguration().isTracingEnabled() ? Constants.ENABLED : Constants.DISABLED;
         inboundObject.put(Constants.TRACING, tracingState);
-        inboundObject.put(SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+        inboundObject.put(SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
                 InboundEndpointSerializer.serializeInboundEndpoint(inboundEndpoint)));
 
         JSONArray parameterListObject = new JSONArray();

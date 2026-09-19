@@ -237,7 +237,7 @@ public class ApiResource extends APIResource {
         apiObject.put("context", api.getContext());
         apiObject.put("port", api.getPort());
 
-        OMElement apiConfiguration = Utils.maskPasswordsInConfiguration(APISerializer.serializeAPI(api));
+        OMElement apiConfiguration = Utils.maskSecretsInConfiguration(APISerializer.serializeAPI(api));
         apiObject.put(Constants.SYNAPSE_CONFIGURATION, apiConfiguration.toString());
         Resource[] resources = api.getResources();
 

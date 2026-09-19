@@ -230,7 +230,7 @@ public class LocalEntryResource implements MiApiResource {
 
         Object value = localEntry.getValue();
         if (value instanceof OMElement) {
-            return Utils.maskPasswordsInConfiguration((OMElement) value);
+            return Utils.maskSecretsInConfiguration((OMElement) value);
         }
         return Utils.maskSecretValue(localEntry.getKey(), value);
     }

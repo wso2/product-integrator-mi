@@ -197,10 +197,14 @@ public class MessageStoreResource implements MiApiResource {
         jsonObject.put(Constants.NAME, messageStore.getName());
         jsonObject.put(CONTAINER_ATTRIBUTE, messageStore.getArtifactContainerName());
         jsonObject.put(FILE_NAME_ATTRIBUTE, messageStore.getFileName());
-        jsonObject.put(PROPERTIES_ATTRIBUTE, Utils.maskPasswordParameters(messageStore.getParameters()));
+        jsonObject.put(PROPERTIES_ATTRIBUTE, Utils.maskSecretParameters(messageStore.getParameters()));
         jsonObject.put(STORE_SIZE_ATTRIBUTE, messageStore.size());
-        jsonObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
-                MessageStoreSerializer.serializeMessageStore(null, messageStore, true)));
+        // The serializer masks the parameters it recognises as a password by itself, hence it is told to mask only
+        // while the masking is turned on.
+        jsonObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
+                MessageStoreSerializer.serializeMessageStore(null, messageStore,
+                        Utils.isSecretMaskingEnabled())));
         return jsonObject;
     }
+
 }

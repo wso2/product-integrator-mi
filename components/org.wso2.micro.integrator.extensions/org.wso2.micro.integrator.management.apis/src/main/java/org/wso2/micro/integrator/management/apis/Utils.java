@@ -38,6 +38,7 @@ import org.json.JSONObject;
 import org.ops4j.pax.logging.PaxLoggingConstants;
 import org.osgi.service.cm.Configuration;
 import org.osgi.service.cm.ConfigurationAdmin;
+import org.wso2.config.mapper.ConfigParser;
 import org.wso2.micro.core.util.AuditLogger;
 import org.wso2.micro.integrator.initializer.utils.ConfigurationHolder;
 import org.wso2.micro.integrator.registry.MicroIntegratorRegistry;
@@ -805,6 +806,29 @@ public class Utils {
     }
 
     /**
+     * Checks whether the secrets of an artifact configuration should be masked before it is returned. Masking is
+     * enabled unless a deployment turns it off through {@code [management_api.secret_masking] enabled = false}, so
+     * that masking applies by default and only a deployment which opts out is served the configuration as it is.
+     * Masking is also kept on for a value which is not an explicit false, so that a mistyped value masks rather than
+     * exposes the secrets.
+     *
+     * @return true if the secrets of a configuration have to be masked
+     */
+    public static boolean isSecretMaskingEnabled() {
+        Map<String, Object> parsedConfigs = ConfigParser.getParsedConfigs();
+        if (parsedConfigs == null) {
+            return true;
+        }
+        Object maskingEnabled = parsedConfigs.get(Constants.SECRET_MASKING_ENABLED);
+        if (maskingEnabled == null) {
+            return true;
+        }
+        // The masking is turned off only by an explicit false, which a deployment.toml may quote, so that a value
+        // which is mistyped keeps the secrets masked instead of exposing them.
+        return !Boolean.FALSE.toString().equalsIgnoreCase(String.valueOf(maskingEnabled).trim());
+    }
+
+    /**
      * Checks whether the given artifact parameter holds a secret which should not be exposed via the management API.
      * The decision is based only on the name of the parameter, since the resolved value of a parameter carries no
      * indication of whether it is a secret.
@@ -836,12 +860,17 @@ public class Utils {
      * parameter such as {@code transport.vfs.FileURI} holds the credentials of the remote file system within the URI
      * and therefore cannot be detected using the name of the parameter. A value which is not a string is returned as
      * it is, since only a string can carry a URI.
+     * <p>
+     * The value is returned as it is when a deployment turns the secret masking off.
      *
      * @param parameterName name of the artifact parameter
      * @param value         value of the artifact parameter
-     * @return the masked value, or the given value when it carries no secret
+     * @return the masked value, or the given value when it carries no secret or the masking is turned off
      */
     public static Object maskSecretValue(String parameterName, Object value) {
+        if (!isSecretMaskingEnabled()) {
+            return value;
+        }
         if (isSecretParameter(parameterName)) {
             return Constants.PASSWORD_MASKED_VALUE;
         }
@@ -853,13 +882,14 @@ public class Utils {
     }
 
     /**
-     * Returns a copy of the given parameter map where the secrets held by the parameters are masked. The given map is
-     * never modified since artifacts return the live parameter map used at runtime.
+     * Returns a copy of the given parameter map where the secrets held by the parameters are masked, unless a
+     * deployment turns the secret masking off. The given map is never modified since artifacts return the live
+     * parameter map used at runtime, and a copy is returned whether or not the masking is turned off.
      *
      * @param parameters artifact parameters
-     * @return a masked copy of the given parameters
+     * @return a copy of the given parameters, masked unless the masking is turned off
      */
-    public static Map<String, Object> maskPasswordParameters(Map<String, ?> parameters) {
+    public static Map<String, Object> maskSecretParameters(Map<String, ?> parameters) {
         if (parameters == null) {
             return null;
         }
@@ -869,12 +899,13 @@ public class Utils {
     }
 
     /**
-     * Returns a copy of the given json representation of an artifact where the secret values are masked. A secret is
-     * either the value of a field whose name denotes a secret, or the credentials carried by a URI such as the
-     * address of an endpoint. The given object is never modified, since artifacts cache and reuse it.
+     * Returns a copy of the given json representation of an artifact where the secret values are masked, unless a
+     * deployment turns the secret masking off. A secret is either the value of a field whose name denotes a secret,
+     * or the credentials carried by a URI such as the address of an endpoint. The given object is never modified,
+     * since artifacts cache and reuse it, and a copy is returned whether or not the masking is turned off.
      *
      * @param artifactJson json representation of an artifact
-     * @return a masked copy of the given json representation
+     * @return a copy of the given json representation, masked unless the masking is turned off
      */
     public static JSONObject maskSecretsInJson(JSONObject artifactJson) {
         if (artifactJson == null) {
@@ -925,13 +956,19 @@ public class Utils {
      * <p>
      * The given element is copied before it is masked, so an element owned by the synapse configuration can be
      * passed. Dropping that copy would make the masked value the one used at runtime.
+     * <p>
+     * The element is returned as it is when a deployment turns the secret masking off, since the configuration of an
+     * artifact is the source a management API client was served unmasked before the secrets were masked.
      *
      * @param artifactElement artifact configuration
-     * @return a masked copy of the given element
+     * @return a masked copy of the given element, or the given element when the masking is turned off
      */
-    public static OMElement maskPasswordsInConfiguration(OMElement artifactElement) {
+    public static OMElement maskSecretsInConfiguration(OMElement artifactElement) {
         if (artifactElement == null) {
             return null;
+        }
+        if (!isSecretMaskingEnabled()) {
+            return artifactElement;
         }
         // The copy keeps the masking away from an element which is owned by the synapse configuration.
         OMElement maskedElement = artifactElement.cloneOMElement();

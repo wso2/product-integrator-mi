@@ -275,7 +275,7 @@ public class TemplateResource extends APIResource {
         JSONObject endpointTemplateJSONObject = new JSONObject();
         endpointTemplateJSONObject.put(Constants.NAME, endpointTemplate.getName());
         endpointTemplateJSONObject.put(PARAMETERS, endpointTemplate.getParameters());
-        endpointTemplateJSONObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+        endpointTemplateJSONObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
                 new TemplateSerializer().serializeEndpointTemplate(endpointTemplate, null)));
         endpointTemplateJSONObject.put(TEMPLATE_TYPE_PARAM, ENDPOINT_TEMPLATE_TYPE);
 
@@ -291,7 +291,7 @@ public class TemplateResource extends APIResource {
         JSONObject sequenceTemplateJSONObject = new JSONObject();
         sequenceTemplateJSONObject.put(Constants.NAME, sequenceTemplate.getName());
         sequenceTemplateJSONObject.put(PARAMETERS, sequenceTemplate.getParameters());
-        sequenceTemplateJSONObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskPasswordsInConfiguration(
+        sequenceTemplateJSONObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
                 new TemplateMediatorSerializer().serializeMediator(null, sequenceTemplate)));
         sequenceTemplateJSONObject.put(TEMPLATE_TYPE_PARAM, SEQUENCE_TEMPLATE_TYPE);
         return sequenceTemplateJSONObject;
