@@ -709,7 +709,6 @@
                 <include>org.graalvm.shadowed:icu4j:jar</include>
                 <include>org.graalvm.js:js-scriptengine:jar</include>
                 <include>org.graalvm.js:js-language:jar</include>
-                <include>org.brotli:dec:jar</include>
                 <!--
                 javax jms-api need to be in class path for axis2
                 ( needs javax.jms.JMSException )

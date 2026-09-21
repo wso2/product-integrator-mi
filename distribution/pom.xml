@@ -220,10 +220,6 @@
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcutil-jdk18on</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.brotli</groupId>
-            <artifactId>dec</artifactId>
-        </dependency>
     </dependencies>
     <build>
         <plugins>
