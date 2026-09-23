@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="testEndpoint">
-   <address uri="http://localhost:8280/services/testdss"/>
-</endpoint>

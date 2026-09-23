@@ -1,9 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="CallerProxy" transports="https http" startOnLoad="true" trace="disable">
-        <description/>
-        <target>
-            <inSequence>
-                <property name="FORCE_SC_ACCEPTED" value="true" scope="axis2"/>
-                <call-template target="Templ1"/>
-            </inSequence>
-        </target>
-    </proxy>

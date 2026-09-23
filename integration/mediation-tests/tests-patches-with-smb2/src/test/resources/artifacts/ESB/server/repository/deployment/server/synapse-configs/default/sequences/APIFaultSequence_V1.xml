@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="APIFaultSequence_V1">
-        <log level="custom" category="ERROR">
-            <property name="logAPIFaultSequence" value="Msg came into APIFaultSequence_V1 ###"/>
-        </log>
-        <respond/>
-    </sequence>

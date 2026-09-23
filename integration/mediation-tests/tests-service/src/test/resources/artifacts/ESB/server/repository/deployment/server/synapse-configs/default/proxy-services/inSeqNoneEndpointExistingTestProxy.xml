@@ -1,5 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="inSeqNoneEndpointExistingTestProxy" transports="https http" startOnLoad="true" trace="disable">
-        <description/>
-        <target endpoint="service_endpoint"/>
-
-    </proxy>

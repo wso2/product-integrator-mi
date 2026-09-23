@@ -1,6 +1,0 @@
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse" class="org.apache.synapse.message.processor.impl.sampler.SamplingProcessor" name="EmptyMsgBodyTestProcessor" messageStore="EmptyMsgBodyTestStore">
-        <parameter name="sequence">replySequence</parameter>
-        <parameter name="interval">1000</parameter>
-        <parameter name="is.active">true</parameter>
-        <parameter name="concurrency">1</parameter>
-    </messageProcessor>

@@ -1,8 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="MtomEnabledBackEnd" startOnLoad="true" transports="http https">
-        <description/>
-        <target>
-            <inSequence>
-                <respond/>
-            </inSequence>
-        </target>
-    </proxy>

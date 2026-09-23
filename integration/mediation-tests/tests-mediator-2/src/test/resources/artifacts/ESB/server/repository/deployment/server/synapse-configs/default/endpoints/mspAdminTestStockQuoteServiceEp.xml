@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="mspAdminTestStockQuoteServiceEp">
-    <address uri="http://localhost:9018/services/SimpleStockQuoteService"/>
-</endpoint>

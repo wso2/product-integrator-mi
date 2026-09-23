@@ -1,3 +1,0 @@
-<api xmlns="http://ws.apache.org/ns/synapse" name="testDeleteCall" context="/testdeletecall">
-        <resource methods="DELETE POST PUT GET" url-mapping="/*" inSequence="makeCallWithDelete"/>
-    </api>

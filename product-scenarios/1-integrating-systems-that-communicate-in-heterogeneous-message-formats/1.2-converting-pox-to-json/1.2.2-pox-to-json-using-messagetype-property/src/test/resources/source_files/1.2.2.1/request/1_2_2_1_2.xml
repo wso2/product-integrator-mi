@@ -1,7 +1,0 @@
-<tmp:LookupCityRequest xmlns:tmp="http://tempuri.org">
-    <tmp:LookupCity>
-        <tmp:Zip>35801</tmp:Zip>
-        <tmp:Zip>85001</tmp:Zip>
-        <tmp:Zip>99501</tmp:Zip>
-    </tmp:LookupCity>
-</tmp:LookupCityRequest>

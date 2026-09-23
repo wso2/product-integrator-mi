@@ -1,8 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="pocmt_seqFinish">
-        <property name="messageType" value="text/xml" scope="axis2"/>
-        <property name="NO_ENTITY_BODY" scope="axis2" action="remove"/>
-        <property name="RESPONSE" value="true"/>
-        <header name="To" action="remove"/>
-        <send/>
-        <drop/>
-    </sequence>

@@ -1,3 +1,0 @@
-<api xmlns="http://ws.apache.org/ns/synapse" context="/testbackend" name="TestBackEndSimulateAPI">
-        <resource inSequence="testBackendAPISequence" methods="HEAD DELETE POST GET OPTIONS PUT PATCH" url-mapping="/*"/>
-    </api>

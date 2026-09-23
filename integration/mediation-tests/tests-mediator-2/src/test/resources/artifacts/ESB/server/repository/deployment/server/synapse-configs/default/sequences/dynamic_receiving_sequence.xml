@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="dynamic_receiving_sequence">
-        <log>
-            <property name="Receiving Sequence" value="Config Reg"/>
-        </log>
-        <send/>
-    </sequence>

@@ -387,7 +387,13 @@ public class MetricHandler extends AbstractExtendedSynapseHandler {
             if (servicePort.contains(DELIMITER)) {
                 servicePort = servicePort.substring(0, servicePort.indexOf(DELIMITER));
             }
-            invokePort = Integer.parseInt(servicePort);
+            try {
+                invokePort = Integer.parseInt(servicePort);
+            } catch (NumberFormatException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Could not parse port from SERVICE_PREFIX, defaulting to 0. Value: " + servicePort);
+                }
+            }
         }
         return invokePort;
     }

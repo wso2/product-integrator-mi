@@ -1,5 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="ProxyPF" transports="https http" startOnLoad="true" trace="disable">
-        <description/>
-        <target inSequence="PF"/>
-        <publishWSDL uri="http://localhost:9000/services/Axis2Service?wsdl"/>
-    </proxy>

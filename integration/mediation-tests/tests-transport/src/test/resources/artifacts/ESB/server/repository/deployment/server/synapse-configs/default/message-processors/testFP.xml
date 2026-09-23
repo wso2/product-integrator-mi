@@ -1,6 +1,0 @@
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse" class="org.apache.synapse.message.processor.impl.forwarder.ScheduledMessageForwardingProcessor" name="testFP" targetEndpoint="stockQuoteEP" messageStore="test">
-        <parameter name="message.processor.reply.sequence">repSeq</parameter>
-        <parameter name="client.retry.interval">1000</parameter>
-        <parameter name="interval">1000</parameter>
-        <parameter name="is.active">true</parameter>
-    </messageProcessor>

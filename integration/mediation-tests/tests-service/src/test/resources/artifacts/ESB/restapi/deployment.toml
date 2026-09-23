@@ -1,9 +1,0 @@
-[server]
-hostname = "localhost"
-
-[transport.http]
-listener.enable = false
-sender.enable = false
-
-[management_api.jwt_token_security_handler]
-enable = false

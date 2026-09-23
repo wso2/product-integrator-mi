@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="MockTimeoutTemplateEndpoint" template="HTTPEndpointTemplate" uri="http://localhost:8480/getQuote">
-        <axis2ns168:parameter xmlns:axis2ns168="http://ws.apache.org/ns/synapse" name="timeout" value="{get-property('timeout')}"/>
-    </endpoint>

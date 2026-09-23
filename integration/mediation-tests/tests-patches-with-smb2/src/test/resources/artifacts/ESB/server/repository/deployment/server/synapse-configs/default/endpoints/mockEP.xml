@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="mockEP">
-    <http method="get"
-          uri-template="http://localhost:8480/HTTPSC500ReturnAPI"/>
-</endpoint>

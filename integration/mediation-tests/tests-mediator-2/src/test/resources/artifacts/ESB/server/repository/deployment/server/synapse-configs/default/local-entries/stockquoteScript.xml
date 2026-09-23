@@ -1,1 +1,0 @@
-<localEntry xmlns="http://ws.apache.org/ns/synapse" key="stockquoteScript" src="file:samples/service-bus/resources/script/stockquoteTransform.js"/>

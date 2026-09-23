@@ -1,9 +1,0 @@
-<template xmlns="http://ws.apache.org/ns/synapse" name="SeqTemplate2">
-        <parameter name="param1"/>
-        <sequence>
-            <log level="custom">
-                <property name="STATUS" value=" Templ2 S1 "/>
-                <property xmlns:ns="http://org.apache.synapse/xsd" name="param" expression="$func:param1"/>
-            </log>
-        </sequence>
-    </template>

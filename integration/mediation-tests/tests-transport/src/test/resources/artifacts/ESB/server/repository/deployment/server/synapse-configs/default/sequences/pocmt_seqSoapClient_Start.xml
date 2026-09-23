@@ -1,7 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="pocmt_seqSoapClient_Start">
-        <log level="custom">
-            <property name="MessageType value inside SoapClient plugin" expression="$axis2:messageType"/>
-            <property name="SoapClient envelope request received" expression="/"/>
-        </log>
-        <sequence key="pocmt_seqSoapClient_Finish"/>
-    </sequence>

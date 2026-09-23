@@ -1,5 +1,0 @@
-instructions.configure = \
-org.eclipse.equinox.p2.touchpoint.natives.mkdir(path:${installFolder}/../../../deployment);\
-org.eclipse.equinox.p2.touchpoint.natives.mkdir(path:${installFolder}/../../../deployment/server);\
-org.eclipse.equinox.p2.touchpoint.natives.mkdir(path:${installFolder}/../../../deployment/server/synapse-configs);\
-org.eclipse.equinox.p2.touchpoint.natives.mkdir(path:${installFolder}/../../../deployment/server/synapse-configs/default);

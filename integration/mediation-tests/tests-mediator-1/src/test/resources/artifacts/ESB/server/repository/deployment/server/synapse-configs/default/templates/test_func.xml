@@ -1,8 +1,0 @@
-<template xmlns="http://ws.apache.org/ns/synapse" name="test_func">
-        <parameter name="test_key"/>
-        <sequence>
-            <log level="full">
-                <property name="PARAM" expression="$func:test_key"/>
-            </log>
-        </sequence>
-    </template>

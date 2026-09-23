@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="errorHandler">
-   <makefault version="soap11" response="true">
-      <code xmlns:tns="http://schemas.xmlsoap.org/soap/envelope/" value="tns:Server"/>
-      <reason value="COULDN'T SEND THE MESSAGE TO THE SERVER."/>
-   </makefault>
-   <send/>
-</sequence>

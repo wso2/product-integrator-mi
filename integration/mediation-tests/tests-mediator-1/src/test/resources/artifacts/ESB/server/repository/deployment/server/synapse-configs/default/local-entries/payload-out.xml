@@ -1,7 +1,0 @@
-<localEntry xmlns="http://ws.apache.org/ns/synapse" key="payload-out">
-        <m:CheckPriceResponse xmlns:m="http://services.samples/xsd">
-            <m:Code>$1</m:Code>
-            <m:Price>$2</m:Price>
-        </m:CheckPriceResponse>
-        <description/>
-    </localEntry>

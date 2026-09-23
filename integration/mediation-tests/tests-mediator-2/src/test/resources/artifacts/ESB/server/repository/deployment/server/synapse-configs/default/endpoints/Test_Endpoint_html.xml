@@ -1,2 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="Test_Endpoint_html" template="MainTemplate"
-          uri="http://en.wikipedia.org/wiki/Wso2"/>

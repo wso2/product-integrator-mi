@@ -1,8 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="c" onError="cF">
-        <log level="custom">
-            <property name="c" value="Sequence C"/>
-        </log>
-        <send>
-            <endpoint key="StockQuoteEP"/>
-        </send>
-    </sequence>

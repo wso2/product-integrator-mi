@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="ReceiveSeq_2">
-        <log level="custom">
-            <property name="DEBUG SEQ 2" value="SECOND RECEIVE SEQUENCE"/>
-        </log>
-        <send/>
-    </sequence>

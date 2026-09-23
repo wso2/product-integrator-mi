@@ -1,5 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="repSeq">
-        <log level="full">
-            <property name="OM_ELEMENT_PREFIX_" expression="$ctx:ORI_BODY"/>
-        </log>
-    </sequence>

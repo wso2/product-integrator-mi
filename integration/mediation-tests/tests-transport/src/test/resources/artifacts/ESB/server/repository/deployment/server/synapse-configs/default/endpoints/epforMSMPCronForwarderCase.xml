@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="epforMSMPCronForwarderCase">
-    <address uri="http://localhost:8480/customerservice/customers"/>
-</endpoint>

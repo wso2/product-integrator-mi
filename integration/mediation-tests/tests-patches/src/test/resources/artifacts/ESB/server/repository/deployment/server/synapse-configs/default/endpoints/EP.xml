@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="EP">
-    <address uri="http://localhost:8480/services/test-500-ep"/>
-</endpoint>

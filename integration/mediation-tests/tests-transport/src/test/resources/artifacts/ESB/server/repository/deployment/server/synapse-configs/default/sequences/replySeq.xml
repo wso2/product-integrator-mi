@@ -1,3 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="replySeq">
-      <log level="full"/>
-   </sequence>

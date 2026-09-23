@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="d" onError="aF">
-        <log level="custom">
-            <property name="d" value="Sequence D"/>
-        </log>
-        <send/>
-    </sequence>

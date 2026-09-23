@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="jmsEndpointSoap12">
-                <address uri="jms:/TestQueueSoap12?transport.jms.ConnectionFactoryJNDIName=QueueConnectionFactory&amp;java.naming.factory.initial=org.apache.activemq.jndi.ActiveMQInitialContextFactory&amp;java.naming.provider.url=tcp://127.0.0.1:61616&amp;transport.jms.DestinationType=queue" format="soap12"/>
-            </endpoint>

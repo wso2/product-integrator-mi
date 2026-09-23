@@ -1,8 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="myfault">
-        <makefault version="soap11">
-            <code xmlns:soap11Env="http://schemas.xmlsoap.org/soap/envelope/" value="soap11Env:VersionMismatch"/>
-            <reason value="Fault Sequence Invoked"/>
-            <role/>
-        </makefault>
-        <respond/>
-    </sequence>
