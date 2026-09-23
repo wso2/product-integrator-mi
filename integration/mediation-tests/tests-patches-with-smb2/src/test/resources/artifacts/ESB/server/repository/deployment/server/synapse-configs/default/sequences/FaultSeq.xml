@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="FaultSeq">
-        <log level="full">
-            <property name="FaultSeq" value="*********** FaultSeq *****************"/>
-        </log>
-        <drop/>
-    </sequence>

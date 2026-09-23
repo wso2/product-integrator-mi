@@ -1,1 +1,0 @@
-Scripts used in integration tests to unset data bases.

@@ -1,9 +1,0 @@
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse" class="org.apache.synapse.message.processor.impl.forwarder.ScheduledMessageForwardingProcessor" name="Processor1" targetEndpoint="EP" messageStore="JMSMS">
-      <parameter name="client.retry.interval">2000</parameter>
-      <parameter name="max.store.connection.attempts">-1</parameter>
-      <parameter name="store.connection.retry.interval">1000</parameter>
-      <parameter name="max.delivery.attempts">4</parameter>
-      <parameter name="interval">4000</parameter>
-      <parameter name="non.retry.status.codes">200,202</parameter>
-      <parameter name="is.active">true</parameter>
-   </messageProcessor>

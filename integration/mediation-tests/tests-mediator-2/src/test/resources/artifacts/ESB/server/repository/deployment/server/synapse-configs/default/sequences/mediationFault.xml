@@ -1,7 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="mediationFault">
-    <makefault>
-        <code xmlns:tns="http://schemas.xmlsoap.org/soap/envelope/" value="tns:Server"/>
-        <reason value="Mediation failed."/>
-    </makefault>
-    <send/>
-</sequence>

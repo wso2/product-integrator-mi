@@ -1,1 +1,0 @@
-<faultstring>com.ctc.wstx.exc.WstxParsingException: Unexpected close tag &lt;/soapenv:Body>; expected &lt;/getQuote>.</faultstring>

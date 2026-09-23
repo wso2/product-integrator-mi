@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse"
-                  class="org.apache.synapse.message.processor.impl.forwarder.ScheduledMessageForwardingProcessor"
-                  name="testMessageProcessor"
-                  messageStore="teststore">
-   <parameter name="throttle">false</parameter>
-</messageProcessor>

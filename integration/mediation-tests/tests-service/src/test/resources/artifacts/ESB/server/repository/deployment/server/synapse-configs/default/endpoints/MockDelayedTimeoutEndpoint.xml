@@ -1,8 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="MockDelayedTimeoutEndpoint">
-        <http method="GET" uri-template="http://localhost:8480/getDelayedQuote">
-            <timeout>
-                <duration>{get-property('timeout')}</duration>
-                <responseAction>fault</responseAction>
-            </timeout>
-        </http>
-    </endpoint>

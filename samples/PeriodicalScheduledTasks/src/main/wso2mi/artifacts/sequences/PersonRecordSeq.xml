@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<sequence name="PersonRecordSeq" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
-    <call description="Send request payload to the endpoint and get the response back to the same sequence">
-        <endpoint key="PersonRecordEP"/>
-    </call>
-    <log description="Log Response Payload" level="full">
-        <property name="MESSAGE" value="RESPONSE PAYLOAD"/>
-    </log>
-</sequence>

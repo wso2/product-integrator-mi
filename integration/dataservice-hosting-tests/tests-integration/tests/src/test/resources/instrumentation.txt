@@ -1,7 +1,0 @@
-org.wso2.micro.integrator.dataservices.core_
-org.wso2.micro.integrator.dataservices.sql.driver_
-org.wso2.micro.integrator.ndatasource.common_
-org.wso2.micro.integrator.ndatasource.core_
-org.wso2.micro.integrator.ndatasource.rdbms_
-org.wso2.micro.integrator.ntask.common_
-org.wso2.micro.integrator.ntask.core_

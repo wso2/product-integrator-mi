@@ -1,4 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="ReferencingProxyStatisticDisable" startOnLoad="true" transports="https http">
-        <description/>
-        <target inSequence="BackendSequence"/>
-    </proxy>

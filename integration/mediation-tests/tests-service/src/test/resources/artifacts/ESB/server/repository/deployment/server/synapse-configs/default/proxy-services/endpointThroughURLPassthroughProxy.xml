@@ -1,6 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="endpointThroughURLPassthroughProxy">
-        <parameter name="transport.vfs.FileURI">file:///home/user/test/in</parameter>
-        <parameter name="transport.vfs.ContentType">text/xml</parameter>
-        <target inSequence="endpointThroughURLPassthroughInSeq" outSequence="endpointThroughURLPassthroughOutSeq"/>
-        <publishWSDL uri="file:samples/service-bus/resources/proxy/sample_proxy_1.wsdl"/>
-    </proxy>

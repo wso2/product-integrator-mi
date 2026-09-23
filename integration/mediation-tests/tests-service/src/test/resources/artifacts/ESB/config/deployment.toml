@@ -1,5 +1,0 @@
-[server]
-hostname = "localhost"
-
-[user_store]
-type = "read_only_ldap"

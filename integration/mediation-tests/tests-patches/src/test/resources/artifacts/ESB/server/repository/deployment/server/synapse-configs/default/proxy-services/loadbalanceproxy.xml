@@ -1,8 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="loadbalanceproxy" transports="https http" startOnLoad="true" trace="disable">
-        <description/>
-        <target endpoint="LoadBalancingEndpoint">
-            <inSequence>
-                <script language="js">var payload = mc.getEnvelope().buildWithAttachments();</script>
-            </inSequence>
-        </target>
-    </proxy>

@@ -1,9 +1,0 @@
-[server]
-hostname = "localhost"
-
-[transport.http]
-listener.verify_client = "require"
-sender.hostname_verifier = "AllowAll"
-
-[management_api.jwt_token_security_handler]
-enable = false

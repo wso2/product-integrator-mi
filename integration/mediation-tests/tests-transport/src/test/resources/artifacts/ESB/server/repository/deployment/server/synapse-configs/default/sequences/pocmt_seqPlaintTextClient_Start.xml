@@ -1,7 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="pocmt_seqPlaintTextClient_Start">
-        <log level="custom">
-            <property name="MessageType value inside PlainText plugin" expression="$axis2:messageType"/>
-            <property name="PlaintText envelope request received" expression="/"/>
-        </log>
-        <sequence key="pocmt_seqPlaintTextClient_Finish"/>
-    </sequence>

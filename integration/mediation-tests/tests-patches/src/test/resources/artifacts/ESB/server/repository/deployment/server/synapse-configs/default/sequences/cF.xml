@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="cF">
-        <log level="custom" category="ERROR">
-            <property name="cF" value="C Fault"/>
-        </log>
-        <respond/>
-    </sequence>

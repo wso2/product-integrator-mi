@@ -1,5 +1,0 @@
-<localEntry xmlns="http://ws.apache.org/ns/synapse" key="xqMsg">
-        <x>
-            <![CDATA[ <ns:Msg xmlns:ns="http://services.samples" /> ]]>
-        </x>
-    </localEntry>

@@ -1,5 +1,0 @@
-<api xmlns="http://ws.apache.org/ns/synapse" name="api_poc_messagetype" context="/services/testmessagetype">
-        <resource methods="POST GET" inSequence="pocmt_seqStart"/>
-        <resource methods="POST GET" url-mapping="/soapclient" inSequence="pocmt_seqSoapClient_Start"/>
-        <resource methods="POST GET" url-mapping="/plaintextclient" inSequence="pocmt_seqPlaintTextClient_Start"/>
-    </api>

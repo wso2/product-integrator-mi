@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="pocmt_epSoapClient" template="pocmt_tmplEpStaticUri" uri="http://localhost:8280/services/testmessagetype/soapclient">
-        <axis2ns4:parameter xmlns:axis2ns4="http://ws.apache.org/ns/synapse" name="timeout" value="3000"/>
-    </endpoint>

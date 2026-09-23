@@ -1,5 +1,0 @@
-<proxy xmlns="http://ws.apache.org/ns/synapse" name="enableHttpPassthroughProxy" transports="http" startOnLoad="true" trace="disable">
-        <description/>
-        <target inSequence="enableHttpPassthroughInSeq" outSequence="enableHttpPassthroughOutSeq"/>
-
-    </proxy>

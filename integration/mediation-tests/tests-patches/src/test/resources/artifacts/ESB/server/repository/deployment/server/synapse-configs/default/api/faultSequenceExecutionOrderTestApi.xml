@@ -1,3 +1,0 @@
-<api xmlns="http://ws.apache.org/ns/synapse" name="faultSequenceExecutionOrderTestApi" context="/faultSequenceExecutionOrderTest">
-        <resource methods="POST GET" inSequence="a" outSequence="d" faultSequence="APIFaultSequence_V1"/>
-    </api>

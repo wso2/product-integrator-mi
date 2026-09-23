@@ -1,2 +1,0 @@
-<localEntry xmlns="http://ws.apache.org/ns/synapse" key="smooksXsltTransform"
-            src="file:samples/service-bus/resources/smooks/transform.xslt"/>

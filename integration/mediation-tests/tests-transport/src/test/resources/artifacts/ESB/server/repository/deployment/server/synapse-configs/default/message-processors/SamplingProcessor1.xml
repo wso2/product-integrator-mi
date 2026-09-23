@@ -1,9 +1,0 @@
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse" class="org.apache.synapse.message.processor.impl.sampler.SamplingProcessor" name="SamplingProcessor1" messageStore="RESTMessageStore" targetEndpoint="RESTEndpoint">
-      <parameter name="interval">4000</parameter>
-      <parameter name="sequence">SamplingSeq</parameter>
-      <parameter name="interval">10000</parameter>
-      <parameter name="client.retry.interval">1000</parameter>
-      <parameter name="is.active">true</parameter>
-      <parameter name="max.delivery.drop">Disabled</parameter>
-      <parameter name="member.count">1</parameter>
-   </messageProcessor>

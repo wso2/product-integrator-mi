@@ -1,9 +1,0 @@
-<template xmlns="http://ws.apache.org/ns/synapse" name="request_generate_template">
-        <sequence>
-            <call>
-                <endpoint>
-                    <http uri-template="http://localhost:8480/members"/>
-                </endpoint>
-            </call>
-        </sequence>
-    </template>

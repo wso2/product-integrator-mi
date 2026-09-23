@@ -1,8 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="SamplingSeq">
-      <log level="custom">
-         <property name="MESSAGE" value="************SamplingSeq IN"/>
-         <property name="IN-Content-Type" expression="$trp:Content-Type"/>
-         <property name="IN-Test-Header-Field" expression="$trp:Test-Header-Field"/>
-      </log>
-      <drop/>
-   </sequence>

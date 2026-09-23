@@ -1,7 +1,0 @@
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse" class="org.apache.synapse.message.processor.impl.forwarder.ScheduledMessageForwardingProcessor" name="JMSTestMessageProcessor" messageStore="JMSTestMessageStoreUpdatingTest" targetEndpoint="JMSEndPoint">
-        <parameter name="interval">4000</parameter>
-        <parameter name="client.retry.interval">1000</parameter>
-        <parameter name="is.active">true</parameter>
-        <parameter name="max.delivery.drop">Disabled</parameter>
-        <parameter name="member.count">1</parameter>
-    </messageProcessor>

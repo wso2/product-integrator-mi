@@ -1,3 +1,0 @@
-<localEntry xmlns="http://ws.apache.org/ns/synapse" key="price_req">
-        <m0:symbol xmlns:m0="http://services.samples">MSFT</m0:symbol>
-    </localEntry>

@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="pocmt_epMakeTextPlainCall_r">
-        <log level="custom">
-            <property name="TextPlainClient envelope response returned" expression="/"/>
-        </log>
-        <sequence key="pocmt_seqMakeSoapCall2"/>
-    </sequence>

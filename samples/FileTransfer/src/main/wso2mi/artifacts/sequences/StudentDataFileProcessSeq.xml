@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<sequence name="StudentDataFileProcessSeq" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
-    <log description="Log student file records" level="full"/>
-</sequence>

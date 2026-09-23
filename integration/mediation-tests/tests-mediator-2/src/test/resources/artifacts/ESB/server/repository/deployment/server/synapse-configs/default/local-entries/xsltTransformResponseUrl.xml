@@ -1,2 +1,0 @@
-<localEntry xmlns="http://ws.apache.org/ns/synapse" key="xsltTransformResponseUrl"
-            src="https://raw.githubusercontent.com/wso2/micro-integrator/master/integration/samples/service-bus/resources/transform/transform_back.xslt"/>

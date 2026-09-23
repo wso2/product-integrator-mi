@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="ep2">
-      <address uri="http://localhost:8080/rest/api/customerservice/customers"/>
-   </endpoint>

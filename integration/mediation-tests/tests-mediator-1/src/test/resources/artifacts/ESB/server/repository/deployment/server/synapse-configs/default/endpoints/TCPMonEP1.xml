@@ -1,3 +1,0 @@
-<endpoint xmlns="http://ws.apache.org/ns/synapse" name="TCPMonEP1">
-        <address uri="http://localhost:9005/services/SimpleStockQuoteService"/>
-    </endpoint>

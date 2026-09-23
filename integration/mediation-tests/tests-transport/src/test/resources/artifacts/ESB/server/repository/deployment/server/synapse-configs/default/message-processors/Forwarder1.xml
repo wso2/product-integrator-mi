@@ -1,7 +1,0 @@
-<messageProcessor xmlns="http://ws.apache.org/ns/synapse" class="org.apache.synapse.message.processor.impl.forwarder.ScheduledMessageForwardingProcessor" name="Forwarder1" targetEndpoint="epforMSMPCronForwarderCase" messageStore="JMSMS">
-      <parameter name="message.processor.reply.sequence">replySeq</parameter>
-      <parameter name="client.retry.interval">1000</parameter>
-      <parameter name="interval">1</parameter>
-      <parameter name="is.active">true</parameter>
-      <parameter name="cronExpression">0/25 * * * * ?</parameter>
-   </messageProcessor>

@@ -1,6 +1,0 @@
-<sequence xmlns="http://ws.apache.org/ns/synapse" name="ReplySeq">
-        <log level="full">
-            <property name="ReplySeq" value="*********** ReplySeq *****************"/>
-        </log>
-        <drop/>
-    </sequence>

@@ -1,4 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<sequence name="secondSubFlow" trace="disable" xmlns="http://ws.apache.org/ns/synapse">
-    <property name="flowValue" scope="default" type="STRING" value="flowValue_2"/>
-</sequence>
