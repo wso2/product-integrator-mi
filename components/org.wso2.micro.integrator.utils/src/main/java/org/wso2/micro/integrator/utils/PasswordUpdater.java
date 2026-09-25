@@ -91,11 +91,23 @@ public class PasswordUpdater {
         }
         String dbUsername = getParam(DB_USERNAME, args);
         if (dbUsername == null) {
-            dbUsername = "root";
+            System.out.print("Database username: ");
+            try {
+                dbUsername = InputReader.readInput();
+            } catch (IOException e) {
+                System.err.println(" Could not read Database username : " + e);
+                System.exit(1);
+            }
         }
         String dbPassword = getParam(DB_PASSWORD, args);
         if (dbPassword == null) {
-            dbPassword = "root1234";
+            System.out.print("Database password: ");
+            try {
+                dbPassword = InputReader.readInput();
+            } catch (IOException e) {
+                System.err.println(" Could not read Database password : " + e);
+                System.exit(1);
+            }
         }
 
         // ------------ Load the DB Driver
