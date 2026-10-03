@@ -179,6 +179,17 @@ public class SimpleHttpClient {
         return client.execute(request);
     }
 
+    public HttpResponse doPostWithMultipartFormData(String url, String textFieldName, String textFieldValue,
+                                                     String fileName, byte[] fileContent) throws IOException {
+        MultipartEntityBuilder entityBuilder = MultipartEntityBuilder.create();
+        entityBuilder.setMode(HttpMultipartMode.BROWSER_COMPATIBLE);
+        entityBuilder.addTextBody(textFieldName, textFieldValue, ContentType.TEXT_PLAIN);
+        entityBuilder.addBinaryBody("file", fileContent, ContentType.APPLICATION_OCTET_STREAM, fileName);
+        HttpPost request = new HttpPost(url);
+        request.setEntity(entityBuilder.build());
+        return client.execute(request);
+    }
+
     public HttpResponse doPutWithMultipart(String url, File file, Map<String, String> header)
             throws IOException {
         MultipartEntityBuilder entitybuilder = MultipartEntityBuilder.create();

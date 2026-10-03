@@ -1,0 +1,14 @@
+<localEntry xmlns="http://ws.apache.org/ns/synapse" key="validateJsonSourceSchema"><![CDATA[{
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    }
+  },
+  "required": ["id", "title"]
+}]]><description/>
+</localEntry>
