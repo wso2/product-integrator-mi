@@ -262,21 +262,45 @@ public class CarbonAppResource extends APIResource {
      */
     private DataHandler createDataHandler(String cAppName) {
         ByteArrayDataSource bytArrayDS;
-        Path cAppPath = Paths.get(Utils.getCAppPath(), cAppName);
-        File file = new File(cAppPath.toString());
-        if (file.exists() && !file.isDirectory()) {
-            try (InputStream is = new BufferedInputStream(new FileInputStream(cAppPath.toString()))) {
-                bytArrayDS = new ByteArrayDataSource(is, Constants.MEDIA_TYPE_APPLICATION_OCTET_STREAM);
-                return new DataHandler(bytArrayDS);
-            } catch (FileNotFoundException e) {
-                log.error("Could not find the requested file : " + cAppName + " in : " + cAppPath.toString(), e);
-                return null;
-            } catch (IOException e) {
-                log.error("Error occurred while reading the file : " + cAppName + " in : " + cAppPath.toString(), e);
+
+        try {
+            // Reject if fileName contains path separators
+            if (cAppName.contains("/") || cAppName.contains("\\")) {
+                log.error("Invalid characters in cApp name : " + cAppName);
                 return null;
             }
-        } else {
-            log.error("Could not find the requested file : " + cAppName + " in : " + cAppPath.toString());
+
+            // Canonicalize the intended base directory
+            Path cAppBasePath = Paths.get(Utils.getCAppPath()).toRealPath();
+
+            // Resolve and normalize the full target path
+            Path cAppPath = cAppBasePath.resolve(cAppName).normalize();
+
+            // Validate the resolved path is still within the cApp directory
+            if (!cAppPath.startsWith(cAppBasePath)) {
+                log.error("Path traversal attempt detected for cApp : " + cAppName);
+                return null;
+            }
+
+            File file = cAppPath.toFile();
+            if (file.exists() && !file.isDirectory()) {
+                try (InputStream is = new BufferedInputStream(new FileInputStream(file))) {
+                    bytArrayDS = new ByteArrayDataSource(is, Constants.MEDIA_TYPE_APPLICATION_OCTET_STREAM);
+                    return new DataHandler(bytArrayDS);
+                } catch (FileNotFoundException e) {
+                    log.error("Could not find the requested file : " + cAppName + " in : " + cAppPath, e);
+                    return null;
+                } catch (IOException e) {
+                    log.error("Error occurred while reading the file : " + cAppName + " in : " + cAppPath, e);
+                    return null;
+                }
+            } else {
+                log.error("Could not find the requested file : " + cAppName + " in : " + cAppPath);
+                return null;
+            }
+
+        } catch (IOException e) {
+            log.error("Error resolving cApp file path for : " + cAppName, e);
             return null;
         }
     }
@@ -300,10 +324,33 @@ public class CarbonAppResource extends APIResource {
                     if (!iterator.hasNext()) {
                         String fileName = fileElement.getAttributeValue(new QName("filename"));
                         if (fileName != null && fileName.endsWith(".car")) {
-                            byte[] bytes = Base64.getDecoder().decode(fileElement.getText());
-                            Path cAppDirectoryPath = Paths.get(Utils.getCarbonHome(), "repository", "deployment",
-                                    "server", "carbonapps", fileName);
                             try {
+                                // Reject early before any filesystem operation
+                                if (fileName.contains("/") || fileName.contains("\\")) {
+                                    log.error("Invalid characters in file name : " + fileName);
+                                    jsonResponse = Utils.createJsonError("Error when deploying the Carbon "
+                                            + "Application. Invalid file name.", axisMsgCtx, BAD_REQUEST);
+                                    Utils.setJsonPayLoad(axisMsgCtx, jsonResponse);
+                                    return;
+                                }
+
+                                // Canonicalize the intended base directory
+                                Path cAppBasePath = Paths.get(Utils.getCarbonHome(), "repository", "deployment",
+                                        "server", "carbonapps").toRealPath();
+
+                                // Resolve and normalize — collapses any ../ sequences
+                                Path cAppDirectoryPath = cAppBasePath.resolve(fileName).normalize();
+
+                                // Enforce boundary — reject if resolved path escapes base dir
+                                if (!cAppDirectoryPath.startsWith(cAppBasePath)) {
+                                    log.error("Path traversal attempt detected for file : " + fileName);
+                                    jsonResponse = Utils.createJsonError("Error when deploying the Carbon "
+                                            + "Application. Invalid file name.", axisMsgCtx, BAD_REQUEST);
+                                    Utils.setJsonPayLoad(axisMsgCtx, jsonResponse);
+                                    return;
+                                }
+
+                                byte[] bytes = Base64.getDecoder().decode(fileElement.getText());
                                 Files.write(cAppDirectoryPath, bytes);
                                 log.info("Successfully added Carbon Application : " + fileName);
                                 jsonResponse.put(Constants.MESSAGE_JSON_ATTRIBUTE, "Successfully added Carbon Application "
