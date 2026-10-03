@@ -266,6 +266,10 @@ public class PrometheusReporterV1 implements MetricReporter {
     public void serviceUp(String serviceName, String serviceType) {
         Gauge gauge = (Gauge) metricMap.get(MetricConstants.SERVICE_UP);
         if (gauge == null) {
+            if (log.isDebugEnabled()) {
+                log.debug("Metrics are not initialized. Skipping service_up for " + serviceType + " : "
+                        + serviceName);
+            }
             return;
         }
         double epochSeconds = System.currentTimeMillis() / 1000.0;

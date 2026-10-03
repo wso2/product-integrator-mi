@@ -37,9 +37,13 @@ import org.apache.synapse.ServerContextInformation;
 import org.apache.synapse.ServerManager;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.SynapseHandler;
+import org.apache.synapse.api.API;
+import org.apache.synapse.config.SynapseConfiguration;
 import org.apache.synapse.core.SynapseEnvironment;
+import org.apache.synapse.core.axis2.ProxyService;
 import org.apache.synapse.debug.SynapseDebugInterface;
 import org.apache.synapse.debug.SynapseDebugManager;
+import org.apache.synapse.inbound.InboundEndpoint;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
@@ -95,6 +99,9 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ServiceBusInitializer {
 
     private static final Log log = LogFactory.getLog(ServiceBusInitializer.class);
+
+    // Artifact type reported by InboundEndpointDeployer on deployment
+    private static final String INBOUND_ENDPOINT_ARTIFACT_TYPE = "inbound-endpoint";
 
     // private static RegistryService registryService;
     private static ServerConfigurationInformation configurationInformation;
@@ -214,7 +221,9 @@ public class ServiceBusInitializer {
                 if ((handler instanceof AbstractExtendedSynapseHandler)) {
                     AbstractExtendedSynapseHandler abstractExtendedSynapseHandler =
                             (AbstractExtendedSynapseHandler) handler;
-                    if (!abstractExtendedSynapseHandler.handleServerInit()) {
+                    if (abstractExtendedSynapseHandler.handleServerInit()) {
+                        notifyLoadedArtifacts(abstractExtendedSynapseHandler, contextInfo.getSynapseConfiguration());
+                    } else {
                         log.warn("Server initialization not executed in the server init path of the " +
                                 "AbstractExtendedSynapseHandler");
                     }
@@ -648,6 +657,47 @@ public class ServiceBusInitializer {
             transactionCounterEnabled = Boolean.parseBoolean(object.toString());
         }
         return transactionCounterEnabled;
+    }
+
+    /**
+     * Notify the handler about artifacts loaded from synapse-configs at startup. These artifacts are built directly
+     * into the SynapseConfiguration and marked as restored, so the deployers never fire the artifact deployment
+     * event for them. Artifacts deployed later (CApps, hot deployment) are notified by the deployers as usual.
+     *
+     * @param handler       handler that completed server initialization
+     * @param synapseConfig configuration built at startup
+     */
+    private void notifyLoadedArtifacts(AbstractExtendedSynapseHandler handler, SynapseConfiguration synapseConfig) {
+        if (synapseConfig == null) {
+            return;
+        }
+        String startTime = String.valueOf(System.currentTimeMillis());
+        for (ProxyService proxy : synapseConfig.getProxyServices()) {
+            notifyArtifactDeployment(handler, proxy.getName(), SynapseConstants.PROXY_SERVICE_TYPE, startTime);
+        }
+        for (API api : synapseConfig.getAPIs()) {
+            notifyArtifactDeployment(handler, api.getName(), SynapseConstants.FAIL_SAFE_MODE_API, startTime);
+        }
+        for (InboundEndpoint inboundEndpoint : synapseConfig.getInboundEndpoints()) {
+            notifyArtifactDeployment(handler, inboundEndpoint.getName(), INBOUND_ENDPOINT_ARTIFACT_TYPE, startTime);
+        }
+    }
+
+    /**
+     * Notify the handler about a single deployed artifact. Failures are logged so that one artifact or handler
+     * cannot interrupt the server startup.
+     */
+    private void notifyArtifactDeployment(AbstractExtendedSynapseHandler handler, String artifactName,
+                                          String artifactType, String startTime) {
+        try {
+            if (!handler.handleArtifactDeployment(artifactName, artifactType, startTime)) {
+                log.warn("Artifact deployment not executed in the startup path of the AbstractExtendedSynapseHandler: "
+                        + handler.getName() + " for " + artifactType + ": " + artifactName);
+            }
+        } catch (Exception e) {
+            log.warn("Error while executing the AbstractExtendedSynapseHandler: " + handler.getName()
+                    + " for the " + artifactType + ": " + artifactName + " at startup", e);
+        }
     }
 
     /**
