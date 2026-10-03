@@ -1590,4 +1590,57 @@ public class CappDeployerTest {
         assertEquals("b.car", files.get(1).getFile().getName());
         assertEquals("c.car", files.get(2).getFile().getName());
     }
+
+    // -------------------------------------------------------------------------
+    // Startup batch size tracking tests (Issue #4883)
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void testStartupBatchSize_EmptyDirectory() {
+        CappDeployer deployer = createDeployer();
+        assertEquals("Empty directory must yield 0 startup batch size", 0, deployer.getStartupBatchSize());
+    }
+
+    @Test
+    public void testStartupBatchSize_WithOnlyTopLevelCars() throws IOException {
+        createCarFile("app1.car", "synapse/api");
+        createCarFile("app2.car", "synapse/sequence");
+
+        CappDeployer deployer = createDeployer();
+        assertEquals("Startup batch size must match top-level CAR count when no embedded CARs exist",
+                2, deployer.getStartupBatchSize());
+    }
+
+    @Test
+    public void testStartupBatchSize_WithEmbeddedCars() throws Exception {
+        createCarFile("regular-app.car", "synapse/api");
+
+        File fatCar = DeployerUtilTest.createFatCarFile(tempCAppDir, "fat-parent.car", "nested-child.car",
+                "com.example", "fat-parent", "1.0.0",
+                "com.example", "nested-child", "1.0.0");
+        tempFiles.add(fatCar);
+
+        CappDeployer deployer = createDeployer();
+        // 2 top-level CARs (regular-app.car + fat-parent.car) + 1 embedded CAR (nested-child.car) = 3 total
+        assertEquals("Startup batch size must account for both top-level and embedded CARs",
+                3, deployer.getStartupBatchSize());
+    }
+
+    @Test
+    public void testStartupBatchSize_CachingAndReset() throws IOException {
+        createCarFile("app1.car", "synapse/api");
+
+        CappDeployer deployer = createDeployer();
+        assertEquals(1, deployer.getStartupBatchSize());
+
+        // Add another car file after initial computation
+        createCarFile("app2.car", "synapse/sequence");
+        // Cached value should remain 1
+        assertEquals("Batch size should be cached after first computation", 1, deployer.getStartupBatchSize());
+
+        // Reset cache
+        deployer.resetStartupBatchSize();
+        assertEquals("Batch size should be recomputed after reset", 2, deployer.getStartupBatchSize());
+    }
 }
+
