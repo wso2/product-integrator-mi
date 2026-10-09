@@ -61,6 +61,8 @@ public class FileBasedTaskRepository implements TaskRepository {
     private static final String REG_TASK_REPO_BASE_PATH = REG_TASK_BASE_PATH + "/" + "definitions";
     private static final char URL_SEPARATOR_CHAR = '/';
     private static final String SYS_GOV_REGISTRY_PROPERTY_NAME = "mi.registry.gov";
+    private static final int TASK_DELETE_MAX_ATTEMPTS = 3;
+    private static final int TASK_DELETE_DELAY_MS = 50;
     private static String resourcePath = getGovernanceRegistryPath();
     private static Marshaller taskMarshaller;
     private static Unmarshaller taskUnmarshaller;
@@ -269,22 +271,16 @@ public class FileBasedTaskRepository implements TaskRepository {
         try {
             File file = new File(getSystemDependentPath(resourcePath + currentTaskPath));
             if (file.exists()) {
-                if (file.delete()) {
+                if (deleteWithRetry(file)) {
                     deleteSuccess = true;
-                } else {
-                    log.error("Error occurred while deleting task. Unable to delete: " + getSystemDependentPath(
-                            resourcePath + currentTaskPath));
                 }
             }
 
             File metaFile = new File(getSystemDependentPath(resourcePath + tasksPath + "/_meta_" + taskName));
             if (metaFile.exists()) {
-                if (metaFile.delete()) {
+                if (deleteWithRetry(metaFile)) {
                     deleteSuccess = true;
                     taskMetaPropMap.remove(getSystemDependentPath(resourcePath + taskName));
-                } else {
-                    log.error("Error occurred while deleting task. Unable to delete: " + getSystemDependentPath(
-                            resourcePath + tasksPath + "/_meta_" + taskName));
                 }
             }
             return deleteSuccess;
@@ -358,5 +354,33 @@ public class FileBasedTaskRepository implements TaskRepository {
     private static XMLStreamReader getXMLStreamReader(InputStream input) throws XMLStreamException {
 
         return xmlInputFactory.createXMLStreamReader(new StreamSource(input));
+    }
+
+    private boolean deleteWithRetry(File file) {
+        if (!file.exists()) {
+            return false;
+        }
+
+        for (int attempt = 1; attempt <= TASK_DELETE_MAX_ATTEMPTS; attempt++) {
+            if (file.delete()) {
+                log.debug("File deleted successfully on attempt " + attempt + ": " + file.getAbsolutePath());
+                return true;
+            } else {
+                // Force garbage collection to help release any unclosed file handles on Windows
+                // Usually file handle is released after 1-2 attempts
+                System.gc();
+            }
+
+            try {
+                Thread.sleep(TASK_DELETE_DELAY_MS);
+            } catch (InterruptedException e) {
+                log.warn("Interrupted while waiting to retry file deletion: " + file.getAbsolutePath());
+                break;
+            }
+        }
+
+        log.error("Error occurred while deleting task. Unable to delete after " + TASK_DELETE_MAX_ATTEMPTS +
+                " attempts: " + file.getAbsolutePath());
+        return false;
     }
 }
