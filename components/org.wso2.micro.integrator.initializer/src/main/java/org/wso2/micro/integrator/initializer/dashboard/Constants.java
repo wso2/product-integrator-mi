@@ -12,6 +12,8 @@ public class Constants {
     public static final String DASHBOARD_CONFIG_GROUP_ID = "dashboard_config.group_id";
     public static final String DASHBOARD_CONFIG_NODE_ID = "dashboard_config.node_id";
     public static final String DASHBOARD_CONFIG_HEARTBEAT_INTERVAL = "dashboard_config.heartbeat_interval";
+    public static final String DASHBOARD_CONFIG_HEARTBEAT_TIMEOUT = "dashboard_config.heartbeat_timeout";
+    public static final String DASHBOARD_CONFIG_HEARTBEAT_BROADCAST = "dashboard_config.heartbeat_broadcast";
     public static final String DASHBOARD_CONFIG_MANAGEMENT_HOSTNAME = "dashboard_config.management_hostname";
     public static final String DASHBOARD_CONFIG_MANAGEMENT_PORT = "dashboard_config.management_port";
 
@@ -58,6 +60,7 @@ public class Constants {
     public static final String DEFAULT_GROUP_ID = "default";
     public static final long DEFAULT_HEARTBEAT_INTERVAL = 10;
     public static final long DEFAULT_COMMAND_RESULT_CACHE_SIZE_MB = 8;
+    public static final long DEFAULT_HEARTBEAT_TIMEOUT = 2;
 
     public static final String HEADER_VALUE_APPLICATION_JSON = "application/json";
     public static final String FORWARD_SLASH = "/";
