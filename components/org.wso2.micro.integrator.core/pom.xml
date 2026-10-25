@@ -36,6 +36,11 @@
 
     <dependencies>
         <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.wso2.carbon.crypto</groupId>
             <artifactId>org.wso2.carbon.crypto.api</artifactId>
         </dependency>
