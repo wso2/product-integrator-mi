@@ -92,6 +92,7 @@ public class AppDeployerServiceComponent {
     @Deactivate
     protected void deactivate(ComponentContext ctxt) {
         log.debug("Deactivating AppDeployerServiceComponent");
+        HeartBeatComponent.shutdownHeartbeatExecutorService();
         startupFinalizer.cleanup();
     }
 
