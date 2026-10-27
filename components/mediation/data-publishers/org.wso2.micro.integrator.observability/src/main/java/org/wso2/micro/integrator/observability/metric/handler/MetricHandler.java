@@ -82,11 +82,14 @@ public class MetricHandler extends AbstractExtendedSynapseHandler {
             incrementProxyCount(proxyName);
             startTimers(synCtx, proxyName, SynapseConstants.PROXY_SERVICE_TYPE, null);
         } else if (null != synCtx.getProperty(SynapseConstants.IS_INBOUND)) {
-            String inboundEndpointName = synCtx.getProperty(SynapseConstants.INBOUND_ENDPOINT_NAME).toString();
-
-            incrementInboundEndPointCount(inboundEndpointName);
-            startTimers(synCtx, inboundEndpointName, MetricConstants.INBOUND_ENDPOINT,
-                    null);
+            // Some flows (eg:- gRPC inbound, WebSocket client relay) mark the message as inbound without
+            // setting the inbound endpoint name, so they cannot be attributed to an inbound endpoint.
+            Object inboundEndpointName = synCtx.getProperty(SynapseConstants.INBOUND_ENDPOINT_NAME);
+            if (null != inboundEndpointName) {
+                incrementInboundEndPointCount(inboundEndpointName.toString());
+                startTimers(synCtx, inboundEndpointName.toString(), MetricConstants.INBOUND_ENDPOINT,
+                        null);
+            }
         } else {
             serviceInvokePort = getServiceInvokePort(synCtx);
 
@@ -152,25 +155,29 @@ public class MetricHandler extends AbstractExtendedSynapseHandler {
                 String name = synCtx.getProperty(SynapseConstants.PROXY_SERVICE).toString();
                 incrementProxyErrorCount(name);
                 stopTimers(synCtx.getProperty(MetricConstants.PROXY_LATENCY_TIMER), synCtx);
-            } else if (null != axis2MessageContext.getProperty("TransportInURL") &&
-                    !axis2MessageContext.getProperty("TransportInURL").toString().contains("services")) {
-                if (null != synCtx.getProperty(SynapseConstants.IS_INBOUND) &&
-                        synCtx.getProperty(SynapseConstants.IS_INBOUND).toString().equals("true")) {
-                    String inboundEndpointName = synCtx.getProperty(SynapseConstants.INBOUND_ENDPOINT_NAME).
-                            toString();
-                    incrementInboundEndpointErrorCount(inboundEndpointName);
+            } else if (null != synCtx.getProperty(SynapseConstants.IS_INBOUND) &&
+                    synCtx.getProperty(SynapseConstants.IS_INBOUND).toString().equals("true")) {
+                // Polling and event-based inbound endpoints (JMS, File, Kafka, etc.) do not set TransportInURL,
+                // so inbound errors must be identified before the URL based checks below.
+                Object inboundEndpointName = synCtx.getProperty(SynapseConstants.INBOUND_ENDPOINT_NAME);
+                if (null != inboundEndpointName) {
+                    incrementInboundEndpointErrorCount(inboundEndpointName.toString());
                     stopTimers(synCtx.getProperty
                             (MetricConstants.INBOUND_ENDPOINT_LATENCY_TIMER), synCtx);
-                } else {
-                    serviceInvokePort = getServiceInvokePort(synCtx);
+                }
+            } else if (null != axis2MessageContext.getProperty(MetricConstants.TRANSPORT_IN_URL)) {
+                serviceInvokePort = getServiceInvokePort(synCtx);
 
-                    if (null != synCtx.getProperty(RESTConstants.SYNAPSE_REST_API) &&
-                            (serviceInvokePort != internalHttpApiPort)) {
-                        String context = axis2MessageContext.getProperty(MetricConstants.TRANSPORT_IN_URL).
-                                toString();
+                if (null != synCtx.getProperty(RESTConstants.SYNAPSE_REST_API) &&
+                        (serviceInvokePort != internalHttpApiPort)) {
+                    String context = axis2MessageContext.getProperty(MetricConstants.TRANSPORT_IN_URL).
+                            toString();
+                    // Count only when the URL resolves to a deployed API. This excludes Axis2 services
+                    // (eg:- /services/MyDataService) without depending on the service path name.
+                    String apiName = getApiName(context, synCtx);
+                    if (null != apiName) {
                         String apiInvocationUrl = axis2MessageContext.getProperty(MetricConstants.SERVICE_PREFIX).
                                 toString() + context.replaceFirst(DELIMITER, EMPTY);
-                        String apiName = getApiName(context, synCtx);
                         incrementApiErrorCount(apiName, apiInvocationUrl);
                         stopTimers(synCtx.getProperty(MetricConstants.API_LATENCY_TIMER), synCtx);
                     }
