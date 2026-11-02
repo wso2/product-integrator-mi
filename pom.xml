@@ -2278,7 +2278,7 @@
         <apache.felix.scr.ds.annotations.version>1.2.4</apache.felix.scr.ds.annotations.version>
         <org.wso2.carbon.caching.core.version>4.2.0</org.wso2.carbon.caching.core.version>
         <json.smart.version>2.5.2</json.smart.version>
-        <google.guava.version>33.6.0-jre</google.guava.version>
+        <google.guava.version>33.7.1-jre</google.guava.version>
         <ca.uhn.hapi.wso2.version>2.4.0.wso2v2</ca.uhn.hapi.wso2.version>
         <junit.version>4.12</junit.version>
         <netty.wso2.version>4.2.18.wso2v1</netty.wso2.version>
