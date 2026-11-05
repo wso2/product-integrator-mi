@@ -31,18 +31,15 @@ public class InputReader {
         //disable external instantiation
     }
 
-    private static final int BYTE_ARRAY_SIZE = 256;
-
     private static BufferedReader stdinReader;
 
     public static String readInput() throws IOException {
-        byte b [] = new byte [BYTE_ARRAY_SIZE];
-        int i = System.in.read(b);
-        String msg = "";
-        if (i != -1) {
-            msg = new String(b).substring(0, i - 1).trim();
+        // Read one line per prompt so that the remaining input is left for the next prompt
+        String line = getStdinReader().readLine();
+        if (line == null) {
+            throw new EOFException("End of input reached");
         }
-        return msg;
+        return line.trim();
     }
 
     public static String readPassword(String prompt) throws IOException {
