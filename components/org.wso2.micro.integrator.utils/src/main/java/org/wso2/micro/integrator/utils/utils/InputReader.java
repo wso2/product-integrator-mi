@@ -19,6 +19,7 @@ package org.wso2.micro.integrator.utils.utils;
 import java.io.PrintWriter;
 import java.io.IOException;
 import java.io.BufferedReader;
+import java.io.EOFException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 
@@ -32,6 +33,8 @@ public class InputReader {
 
     private static final int BYTE_ARRAY_SIZE = 256;
 
+    private static BufferedReader stdinReader;
+
     public static String readInput() throws IOException {
         byte b [] = new byte [BYTE_ARRAY_SIZE];
         int i = System.in.read(b);
@@ -43,13 +46,19 @@ public class InputReader {
     }
 
     public static String readPassword(String prompt) throws IOException {
-        try (PrintWriter out = new PrintWriter(new OutputStreamWriter(System.out), true);
-             BufferedReader in = new BufferedReader(new InputStreamReader(System.in))) {
-            String password = null;
-            while (password == null || password.length() == 0) {
-                password = new PasswordPrompt(prompt, out).getPassword(in);
-            }
-            return password;
+        // Standard input and output are not closed so that subsequent prompts can still use them
+        PrintWriter out = new PrintWriter(new OutputStreamWriter(System.out), true);
+        String password = new PasswordPrompt(prompt, out).getPassword(getStdinReader());
+        if (password == null) {
+            throw new EOFException("End of input reached");
         }
+        return password;
+    }
+
+    private static synchronized BufferedReader getStdinReader() {
+        if (stdinReader == null) {
+            stdinReader = new BufferedReader(new InputStreamReader(System.in));
+        }
+        return stdinReader;
     }
 }

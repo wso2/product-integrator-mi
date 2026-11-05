@@ -101,9 +101,8 @@ public class PasswordUpdater {
         }
         String dbPassword = getParam(DB_PASSWORD, args);
         if (dbPassword == null) {
-            System.out.print("Database password: ");
             try {
-                dbPassword = InputReader.readInput();
+                dbPassword = InputReader.readPassword("Database password: ");
             } catch (IOException e) {
                 System.err.println(" Could not read Database password : " + e);
                 System.exit(1);
@@ -171,6 +170,7 @@ public class PasswordUpdater {
             System.out.println("Password updated successfully.");
         } catch (UserStoreException ex) {
             System.err.println("Error updating credentials for user " + username + " : " + ex);
+            System.exit(1);
         }
     }
 
