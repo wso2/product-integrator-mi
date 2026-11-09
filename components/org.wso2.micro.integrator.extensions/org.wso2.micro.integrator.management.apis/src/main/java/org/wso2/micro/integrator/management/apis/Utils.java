@@ -59,6 +59,7 @@ import java.io.UnsupportedEncodingException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Dictionary;
 import java.util.Hashtable;
 import java.util.Iterator;
@@ -119,6 +120,20 @@ public class Utils {
     private static final QName NAME_ATTRIBUTE = new QName("name");
     private static final QName KEY_ATTRIBUTE = new QName("key");
     private static final QName VALUE_ATTRIBUTE = new QName("value");
+    private static final QName DEFAULT_VALUE_ATTRIBUTE = new QName(Constants.DEFAULT_VALUE);
+    private static final QName EXPRESSION_ATTRIBUTE = new QName("expression");
+
+    /**
+     * Attributes which hold the value of an element. The {@code defaultValue} of a sequence template parameter is the
+     * value the template uses when a caller does not pass the parameter, therefore it is as much a secret as a value.
+     */
+    private static final QName[] VALUE_ATTRIBUTES = {VALUE_ATTRIBUTE, DEFAULT_VALUE_ATTRIBUTE};
+
+    /**
+     * Elements which may carry their value as a child element, which is how a parameter or a property holding well
+     * formed XML is serialized.
+     */
+    private static final String[] XML_VALUE_ELEMENTS = {"parameter", "property"};
 
     /**
      * Matches the credentials of a URI such as {@code vfs:sftp://user:password@host/path}, which is how the VFS
@@ -899,6 +914,34 @@ public class Utils {
     }
 
     /**
+     * Returns the json representation of the parameters of a sequence template where the default value of a secret
+     * parameter is masked, unless a deployment turns the secret masking off. A default value is the value a template
+     * uses when a caller does not pass the parameter, so the default value of a parameter such as {@code password} is
+     * the secret itself. The json representation is built as a copy, hence the parameters used at runtime are never
+     * modified.
+     *
+     * @param parameters parameters of a sequence template
+     * @return the json representation of the given parameters, masked unless the masking is turned off
+     */
+    public static JSONArray maskSecretTemplateParameters(Collection<?> parameters) {
+        if (parameters == null) {
+            return null;
+        }
+        JSONArray parametersJson = new JSONArray(parameters);
+        if (!isSecretMaskingEnabled()) {
+            return parametersJson;
+        }
+        for (int i = 0; i < parametersJson.length(); i++) {
+            JSONObject parameter = parametersJson.optJSONObject(i);
+            if (parameter != null && parameter.has(Constants.DEFAULT_VALUE)
+                    && isSecretParameter(parameter.optString(Constants.NAME, null))) {
+                parameter.put(Constants.DEFAULT_VALUE, Constants.PASSWORD_MASKED_VALUE);
+            }
+        }
+        return parametersJson;
+    }
+
+    /**
      * Returns a copy of the given json representation of an artifact where the secret values are masked, unless a
      * deployment turns the secret masking off. A secret is either the value of a field whose name denotes a secret,
      * or the credentials carried by a URI such as the address of an endpoint. The given object is never modified,
@@ -1006,11 +1049,13 @@ public class Utils {
      * @return true if the value of the element has to be masked
      */
     private static boolean isSecretElement(OMElement element) {
-        if (element.getAttributeValue(KEY_ATTRIBUTE) != null) {
-            // The value is resolved through the registry, hence it is not serialized into the configuration.
+        if (element.getAttributeValue(KEY_ATTRIBUTE) != null
+                || element.getAttributeValue(EXPRESSION_ATTRIBUTE) != null) {
+            // The value is either resolved through the registry or evaluated at runtime, hence the configuration
+            // carries no secret.
             return false;
         }
-        if (isSecretParameter(element.getAttributeValue(NAME_ATTRIBUTE))) {
+        if (isSecretParameter(element.getAttributeValue(NAME_ATTRIBUTE)) && holdsValue(element)) {
             return true;
         }
         // A dedicated element such as <password> or <clientSecret> holds the secret by itself, whereas an element
@@ -1019,15 +1064,49 @@ public class Utils {
     }
 
     /**
-     * Replaces the value of the given element with {@link Constants#PASSWORD_MASKED_VALUE}. The existing value is
-     * dropped first, since a parameter value can also be serialized as a child element when it is well formed XML.
+     * Checks whether the given element carries a value of its own. An element which is named after a secret is masked
+     * only when it does, since a mediator or an inline endpoint such as {@code <class name="...TokenValidator">} or
+     * {@code <endpoint name="TokenServiceEP">} is also named, but holds a configuration which has to be inspected
+     * further instead of being replaced as a whole. Likewise a template parameter which only declares a name has no
+     * value to be masked.
+     *
+     * @param element element to be inspected
+     * @return true if the element carries a value
+     */
+    private static boolean holdsValue(OMElement element) {
+        for (QName valueAttribute : VALUE_ATTRIBUTES) {
+            if (element.getAttribute(valueAttribute) != null) {
+                return true;
+            }
+        }
+        if (element.getFirstElement() == null) {
+            return StringUtils.isNotBlank(element.getText());
+        }
+        for (String xmlValueElement : XML_VALUE_ELEMENTS) {
+            if (xmlValueElement.equals(element.getLocalName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Replaces the value of the given element with {@link Constants#PASSWORD_MASKED_VALUE}. A value held by an
+     * attribute is masked in place. Otherwise the existing value is dropped first, since a parameter value can also be
+     * serialized as a child element when it is well formed XML.
      *
      * @param element element whose value should be masked
      */
     private static void maskElementValue(OMElement element) {
-        OMAttribute valueAttribute = element.getAttribute(VALUE_ATTRIBUTE);
-        if (valueAttribute != null) {
-            valueAttribute.setAttributeValue(Constants.PASSWORD_MASKED_VALUE);
+        boolean maskedAnAttribute = false;
+        for (QName valueAttributeName : VALUE_ATTRIBUTES) {
+            OMAttribute valueAttribute = element.getAttribute(valueAttributeName);
+            if (valueAttribute != null) {
+                valueAttribute.setAttributeValue(Constants.PASSWORD_MASKED_VALUE);
+                maskedAnAttribute = true;
+            }
+        }
+        if (maskedAnAttribute) {
             return;
         }
         OMNode valueNode = element.getFirstOMChild();
@@ -1063,20 +1142,33 @@ public class Utils {
     }
 
     /**
-     * Masks the credentials of the given URI.
+     * Masks the credentials of the given URI. Credentials which resolve their password through a secure vault
+     * expression are left as they are. The expression is looked for only within the password of each URI, since a
+     * value which carries an expression elsewhere, such as in its query, can still carry a password in plain text.
      *
      * @param value value which may be a URI
-     * @return the masked URI, or null if the given value carries no credentials
+     * @return the masked URI, or null if the given value carries no credentials to be masked
      */
     private static String maskCredentialsInUri(String value) {
-        if (StringUtils.isEmpty(value) || containsSecureVaultExpression(value)) {
+        if (StringUtils.isEmpty(value)) {
             return null;
         }
         Matcher matcher = URI_CREDENTIALS_PATTERN.matcher(value);
-        if (!matcher.find()) {
+        StringBuffer maskedValue = new StringBuffer();
+        boolean masked = false;
+        while (matcher.find()) {
+            String credentials = matcher.group();
+            if (!containsSecureVaultExpression(matcher.group(2))) {
+                credentials = matcher.group(1) + ":" + Constants.PASSWORD_MASKED_VALUE + "@";
+                masked = true;
+            }
+            matcher.appendReplacement(maskedValue, Matcher.quoteReplacement(credentials));
+        }
+        if (!masked) {
             return null;
         }
-        return matcher.replaceAll("$1:" + Constants.PASSWORD_MASKED_VALUE + "@");
+        matcher.appendTail(maskedValue);
+        return maskedValue.toString();
     }
 
     /**

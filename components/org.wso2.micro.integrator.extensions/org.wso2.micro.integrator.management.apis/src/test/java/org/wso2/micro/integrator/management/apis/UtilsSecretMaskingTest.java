@@ -25,6 +25,7 @@ import org.json.JSONObject;
 import org.apache.synapse.aspects.AspectConfiguration;
 import org.apache.synapse.config.xml.inbound.InboundEndpointSerializer;
 import org.apache.synapse.inbound.InboundEndpoint;
+import org.apache.synapse.mediators.template.TemplateParam;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -33,6 +34,7 @@ import org.wso2.config.mapper.ConfigParser;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -428,6 +430,160 @@ public class UtilsSecretMaskingTest {
 
         Assert.assertTrue("A uri which resolves its secret at runtime should be left as it is",
                 maskedConfiguration.contains(vaultUri));
+    }
+
+    /**
+     * A secure vault expression outside the credentials of a URI, such as in its query, does not resolve the password
+     * of the URI, hence a password given in plain text has to be masked regardless.
+     */
+    @Test
+    public void testUriCredentialsAreMaskedWhenASecureVaultExpressionIsElsewhere() throws XMLStreamException {
+
+        String vaultQuery = "?ref={wso2:vault-lookup('alias')}";
+        String uri = "vfs:sftp://sftpuser:" + SECRET + "@localhost:22/in" + vaultQuery;
+        OMElement proxy = AXIOMUtil.stringToOM(
+                "<proxy xmlns=\"http://ws.apache.org/ns/synapse\" name=\"MixedVaultProxy\">"
+                        + "<parameter name=\"transport.vfs.FileURI\">" + uri + "</parameter></proxy>");
+
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(proxy).toString();
+
+        Assert.assertFalse("A password in plain text should be masked although the uri carries a vault expression",
+                maskedConfiguration.contains(SECRET));
+        Assert.assertTrue("The user and the vault expression should be preserved",
+                maskedConfiguration.contains("vfs:sftp://sftpuser:" + PASSWORD_MASKED_VALUE + "@localhost:22/in"
+                        + vaultQuery));
+        Assert.assertEquals("A parameter value should be masked the same way",
+                "vfs:sftp://sftpuser:" + PASSWORD_MASKED_VALUE + "@localhost:22/in" + vaultQuery,
+                Utils.maskSecretValue("transport.vfs.FileURI", uri));
+    }
+
+    /**
+     * Each uri of a value is masked on its own, so that a uri which resolves its password through the secure vault
+     * is left as it is while a uri which carries its password in plain text is masked.
+     */
+    @Test
+    public void testOnlyTheUriWhichCarriesAPlainTextPasswordIsMasked() {
+
+        String vaultUri = "sftp://vaultuser:{wso2:vault-lookup('alias')}@vaulthost/in";
+        String plainUri = "sftp://plainuser:" + SECRET + "@plainhost/in";
+
+        Assert.assertEquals("Only the password given in plain text should be masked",
+                vaultUri + " sftp://plainuser:" + PASSWORD_MASKED_VALUE + "@plainhost/in",
+                Utils.maskSecretValue("uris", vaultUri + " " + plainUri));
+    }
+
+    /**
+     * The default value of a sequence template parameter is the value the template uses when a caller does not pass
+     * the parameter, hence the default value of a secret parameter is the secret itself.
+     */
+    @Test
+    public void testMaskSecretDefaultValueOfATemplateParameter() throws XMLStreamException {
+
+        OMElement template = AXIOMUtil.stringToOM(
+                "<template xmlns=\"http://ws.apache.org/ns/synapse\" name=\"CallBackend\">"
+                        + "<parameter name=\"password\" isMandatory=\"false\" defaultValue=\"" + SECRET + "\"/>"
+                        + "<parameter name=\"mode\" isMandatory=\"false\" defaultValue=\"visibleMode\"/>"
+                        + "<parameter name=\"token\" isMandatory=\"true\"/>"
+                        + "<sequence/></template>");
+
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(template).toString();
+
+        Assert.assertFalse("The default value of a secret parameter should be masked",
+                maskedConfiguration.contains(SECRET));
+        Assert.assertTrue("The default value should be masked in place",
+                maskedConfiguration.contains("name=\"password\" isMandatory=\"false\" defaultValue=\""
+                        + PASSWORD_MASKED_VALUE + "\"/>"));
+        Assert.assertTrue("The default value of a parameter which is not a secret should not be masked",
+                maskedConfiguration.contains("defaultValue=\"visibleMode\""));
+        Assert.assertTrue("A secret parameter which only declares its name has no value to be masked",
+                maskedConfiguration.contains("<parameter name=\"token\" isMandatory=\"true\"/>"));
+    }
+
+    @Test
+    public void testMaskSecretDefaultValuesOfTheTemplateParameterList() {
+
+        TemplateParam password = new TemplateParam("password", false, SECRET);
+        TemplateParam mode = new TemplateParam("mode", false, "visibleMode");
+        TemplateParam token = new TemplateParam("token", true, null);
+
+        JSONArray maskedParameters = Utils.maskSecretTemplateParameters(Arrays.asList(password, mode, token));
+
+        Assert.assertEquals("The default value of a secret parameter should be masked",
+                PASSWORD_MASKED_VALUE, maskedParameters.getJSONObject(0).getString(Constants.DEFAULT_VALUE));
+        Assert.assertEquals("The name of a secret parameter should be preserved",
+                "password", maskedParameters.getJSONObject(0).getString(Constants.NAME));
+        Assert.assertEquals("The default value of a parameter which is not a secret should not be masked",
+                "visibleMode", maskedParameters.getJSONObject(1).getString(Constants.DEFAULT_VALUE));
+        Assert.assertFalse("A parameter which has no default value should not be given one",
+                maskedParameters.getJSONObject(2).has(Constants.DEFAULT_VALUE));
+        Assert.assertEquals("The parameter used at runtime should not be modified",
+                SECRET, password.getDefaultValue());
+        Assert.assertNull("A null parameter list should be returned as it is",
+                Utils.maskSecretTemplateParameters(null));
+    }
+
+    @Test
+    public void testTemplateParameterListIsReturnedAsItIsWhenSecretMaskingIsTurnedOff() throws Exception {
+
+        TemplateParam password = new TemplateParam("password", false, SECRET);
+
+        Object previousConfigs = setParsedConfigs(secretMaskingConfig(Boolean.FALSE));
+        try {
+            Assert.assertEquals("The default value should be returned as it is",
+                    SECRET, Utils.maskSecretTemplateParameters(Collections.singletonList(password))
+                            .getJSONObject(0).getString(Constants.DEFAULT_VALUE));
+        } finally {
+            setParsedConfigs(previousConfigs);
+        }
+    }
+
+    /**
+     * A mediator or an inline endpoint can be named after a secret while it holds a configuration rather than a
+     * secret, and a property can be named after a secret while its value is evaluated at runtime. None of these
+     * should be replaced, whereas a secret held within such a configuration should still be masked.
+     */
+    @Test
+    public void testElementsNamedLikeASecretWhichHoldNoSecretAreNotMasked() throws XMLStreamException {
+
+        OMElement sequence = AXIOMUtil.stringToOM(
+                "<sequence xmlns=\"http://ws.apache.org/ns/synapse\" name=\"TokenFlow\">"
+                        + "<log level=\"custom\">"
+                        + "<property name=\"accessToken\" expression=\"$ctx:incomingToken\"/>"
+                        + "</log>"
+                        + "<class name=\"org.example.TokenValidator\">"
+                        + "<property name=\"issuer\" value=\"visibleIssuer\"/>"
+                        + "<property name=\"clientSecret\" value=\"" + SECRET + "\"/>"
+                        + "</class>"
+                        + "<call><endpoint name=\"TokenServiceEP\">"
+                        + "<address uri=\"http://localhost:8290/visibleTokenPath\"/>"
+                        + "</endpoint></call>"
+                        + "</sequence>");
+
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(sequence).toString();
+
+        Assert.assertTrue("A property evaluated at runtime should be left as it is",
+                maskedConfiguration.contains("<property name=\"accessToken\" expression=\"$ctx:incomingToken\"/>"));
+        Assert.assertTrue("A class mediator named after a secret should keep its properties",
+                maskedConfiguration.contains("visibleIssuer"));
+        Assert.assertFalse("A secret property of a class mediator named after a secret should still be masked",
+                maskedConfiguration.contains(SECRET));
+        Assert.assertTrue("An inline endpoint named after a secret should keep its address",
+                maskedConfiguration.contains("http://localhost:8290/visibleTokenPath"));
+    }
+
+    @Test
+    public void testMaskSecretPropertyWhichHoldsXml() throws XMLStreamException {
+
+        OMElement task = AXIOMUtil.stringToOM(
+                "<task xmlns=\"http://ws.apache.org/ns/synapse\" name=\"SecretTask\">"
+                        + "<property name=\"password\"><secret>" + SECRET + "</secret></property>"
+                        + "</task>");
+
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(task).toString();
+
+        Assert.assertFalse("A secret property which holds XML should be masked", maskedConfiguration.contains(SECRET));
+        Assert.assertTrue("The property should be replaced with the masked value",
+                maskedConfiguration.contains(PASSWORD_MASKED_VALUE));
     }
 
     @Test

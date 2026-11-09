@@ -290,7 +290,8 @@ public class TemplateResource extends APIResource {
     private JSONObject getSequenceTemplateAsJson(TemplateMediator sequenceTemplate) {
         JSONObject sequenceTemplateJSONObject = new JSONObject();
         sequenceTemplateJSONObject.put(Constants.NAME, sequenceTemplate.getName());
-        sequenceTemplateJSONObject.put(PARAMETERS, sequenceTemplate.getParameters());
+        sequenceTemplateJSONObject.put(PARAMETERS,
+                Utils.maskSecretTemplateParameters(sequenceTemplate.getParameters()));
         sequenceTemplateJSONObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
                 new TemplateMediatorSerializer().serializeMediator(null, sequenceTemplate)));
         sequenceTemplateJSONObject.put(TEMPLATE_TYPE_PARAM, SEQUENCE_TEMPLATE_TYPE);

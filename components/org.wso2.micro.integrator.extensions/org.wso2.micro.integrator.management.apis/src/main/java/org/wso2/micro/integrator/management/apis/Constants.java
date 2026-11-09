@@ -147,6 +147,7 @@ public class Constants {
     public static final String ADMIN = "admin";
     public static final String PATTERN = "pattern";
     public static final String PASSWORD_MASKED_VALUE = "*****";
+    public static final String DEFAULT_VALUE = "defaultValue";
 
     public static final String USERNAME_PROPERTY = "USERNAME";
     public static final String IS_ADMIN_USER_PROPERTY = "IS_ADMIN_USER";
