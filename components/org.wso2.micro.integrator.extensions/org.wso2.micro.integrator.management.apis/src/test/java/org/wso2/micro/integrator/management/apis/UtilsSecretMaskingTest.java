@@ -855,6 +855,50 @@ public class UtilsSecretMaskingTest {
         Assert.assertTrue("The user of the connection should not be masked", maskedValue.contains("connUser"));
     }
 
+    /**
+     * The inline value of a local entry is passed to the masking as it is, hence its root element can be a secret by
+     * itself or can carry a URI with credentials, rather than only the elements underneath it.
+     */
+    @Test
+    public void testSecretHeldByTheRootElementOfALocalEntryIsMasked() throws Exception {
+
+        String[][] values = {
+                {"<password>" + SECRET + "</password>", "<password>*****</password>"},
+                {"<property name=\"password\" value=\"" + SECRET + "\"/>",
+                        "<property name=\"password\" value=\"*****\"/>"},
+                {"<url>jdbc:mysql://dbuser:" + SECRET + "@host:3306/db</url>",
+                        "<url>jdbc:mysql://dbuser:*****@host:3306/db</url>"},
+                {"<address uri=\"https://uriuser:" + SECRET + "@host/service\"/>",
+                        "<address uri=\"https://uriuser:*****@host/service\"/>"}
+        };
+        for (String[] value : values) {
+            Entry localEntry = new Entry("RootSecretEntry");
+            localEntry.setType(Entry.INLINE_XML);
+            localEntry.setValue(AXIOMUtil.stringToOM(value[0]));
+
+            Assert.assertEquals("The secret held by the root element of " + value[0] + " should be masked",
+                    value[1], localEntryValue(localEntry).toString());
+        }
+    }
+
+    /**
+     * Masking the root element as well must leave the root of an artifact which is named after a secret as it is,
+     * since such a root holds a configuration rather than a value.
+     */
+    @Test
+    public void testArtifactRootNamedLikeASecretIsNotMasked() throws XMLStreamException {
+
+        for (String artifact : new String[]{
+                "<proxy xmlns=\"http://ws.apache.org/ns/synapse\" name=\"TokenProxy\"><target/></proxy>",
+                "<sequence xmlns=\"http://ws.apache.org/ns/synapse\" name=\"PasswordResetSequence\"/>",
+                "<template xmlns=\"http://ws.apache.org/ns/synapse\" name=\"SecretTemplate\"><sequence/></template>",
+                "<endpoint xmlns=\"http://ws.apache.org/ns/synapse\" name=\"TokenServiceEP\">"
+                        + "<address uri=\"http://localhost:8290/tokens\"/></endpoint>"}) {
+            Assert.assertEquals("The root of an artifact named after a secret should be left as it is",
+                    artifact, Utils.maskSecretsInConfiguration(AXIOMUtil.stringToOM(artifact)).toString());
+        }
+    }
+
     private Map<String, Object> secretMaskingConfig(Object value) {
 
         Map<String, Object> parsedConfigs = new LinkedHashMap<>();

@@ -1018,26 +1018,27 @@ public class Utils {
         }
         // The copy keeps the masking away from an element which is owned by the synapse configuration.
         OMElement maskedElement = artifactElement.cloneOMElement();
-        maskSecretElements(maskedElement);
+        // The given element is masked as well as the ones underneath it, since the inline value of a local entry,
+        // such as <password>...</password>, can be a secret by itself.
+        maskSecretElement(maskedElement);
         return maskedElement;
     }
 
     /**
-     * Walks the given element and masks the value of every secret parameter element found underneath it.
+     * Masks the given element when it holds a secret. Otherwise masks the credentials carried by its URIs and walks
+     * the elements underneath it.
      *
-     * @param element element to be inspected
+     * @param element element to be masked
      */
-    private static void maskSecretElements(OMElement element) {
+    private static void maskSecretElement(OMElement element) {
+        if (isSecretElement(element)) {
+            maskElementValue(element);
+            return;
+        }
+        maskCredentialsInUris(element);
         for (OMNode child = element.getFirstOMChild(); child != null; child = child.getNextOMSibling()) {
-            if (!(child instanceof OMElement)) {
-                continue;
-            }
-            OMElement childElement = (OMElement) child;
-            if (isSecretElement(childElement)) {
-                maskElementValue(childElement);
-            } else {
-                maskCredentialsInUris(childElement);
-                maskSecretElements(childElement);
+            if (child instanceof OMElement) {
+                maskSecretElement((OMElement) child);
             }
         }
     }
@@ -1045,8 +1046,8 @@ public class Utils {
     /**
      * Checks whether the given element holds a secret. This covers the shapes used across the synapse artifacts, which
      * are a named parameter such as {@code <parameter name="solace.password">}, a named property such as
-     * {@code <property name="pwd" value="..."/>} and a dedicated element such as the {@code <password>} of a database
-     * mediator or the {@code <clientSecret>} of an OAuth endpoint.
+     * {@code <property name="db.password" value="..."/>} and a dedicated element such as the {@code <password>} of a
+     * database mediator or the {@code <clientSecret>} of an OAuth endpoint.
      *
      * @param element element to be inspected
      * @return true if the value of the element has to be masked
