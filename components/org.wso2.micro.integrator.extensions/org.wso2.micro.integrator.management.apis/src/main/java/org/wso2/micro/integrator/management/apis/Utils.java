@@ -100,13 +100,15 @@ public class Utils {
     private static final String[] SECRET_PARAMETER_NAME_FRAGMENTS =
             {Constants.PASSWORD, "secret", "credential", "token", "passphrase", "signature",
              "apikey", "api.key", "api_key", "api-key",
-             "privatekey", "private.key", "private_key", "private-key"};
+             "privatekey", "private.key", "private_key", "private-key",
+             "accesskey", "access.key", "access_key", "access-key"};
 
     /**
      * Fragments which carry one of the secret fragments but hold no secret, such as the {@code tokenUrl} of an OAuth
-     * configuration or the {@code allowCredentials} flag of a CORS handler. Each is dropped from the name before the
-     * secret fragments are looked for, so that such a parameter stays visible through the management API. They are
-     * compound because a short fragment here would hide real secrets.
+     * configuration, the {@code allowCredentials} flag of a CORS handler or the {@code accessKeyId} which identifies
+     * an access key the way a user name identifies a user. Each is dropped from the name before the secret fragments
+     * are looked for, so that such a parameter stays visible through the management API. They are compound because a
+     * short fragment here would hide real secrets.
      */
     private static final String[] NON_SECRET_PARAMETER_NAME_FRAGMENTS =
             {"allowcredentials",
@@ -115,7 +117,8 @@ public class Utils {
              "tokentype", "token.type", "token_type", "token-type",
              "signaturelength", "signaturealgorithm",
              "passwordcallbackclass", "passwordtype",
-             "secretalias", "privatekeyalias"};
+             "secretalias", "privatekeyalias",
+             "accesskeyid", "access.key.id", "access_key_id", "access-key-id", "accesskeyname"};
 
     private static final QName NAME_ATTRIBUTE = new QName("name");
     private static final QName KEY_ATTRIBUTE = new QName("key");
@@ -1059,8 +1062,10 @@ public class Utils {
             return true;
         }
         // A dedicated element such as <password> or <clientSecret> holds the secret by itself, whereas an element
-        // such as <clientCredentials> only groups other elements and therefore has to be inspected further.
-        return element.getFirstElement() == null && isSecretParameter(element.getLocalName());
+        // such as <clientCredentials> only groups other elements and therefore has to be inspected further. An empty
+        // one, such as the <password/> of a database which has none, has no value to be masked.
+        return element.getFirstElement() == null && isSecretParameter(element.getLocalName())
+                && holdsValue(element);
     }
 
     /**

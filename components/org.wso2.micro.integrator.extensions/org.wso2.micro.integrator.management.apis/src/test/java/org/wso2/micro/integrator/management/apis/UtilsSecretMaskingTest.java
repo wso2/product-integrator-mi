@@ -92,8 +92,19 @@ public class UtilsSecretMaskingTest {
     public void testSecretParameterNamesOfAConnectorConnection() {
 
         for (String name : new String[]{"securityToken", "accessToken", "refresh_token", "gspread_refresh_token",
-                "passphrase", "apiKey", "api.key", "api_key", "privateKey", "private.key", "signature"}) {
+                "passphrase", "apiKey", "api.key", "api_key", "privateKey", "private.key", "signature",
+                "accessKey", "access.key", "access_key", "sharedAccessKey", "awsSecretAccessKey"}) {
             Assert.assertTrue("A connection parameter named " + name + " should be masked",
+                    Utils.isSecretParameter(name));
+        }
+    }
+
+    @Test
+    public void testIdentifiersOfAnAccessKeyAreNotMasked() {
+
+        for (String name : new String[]{"accessKeyId", "awsAccessKeyId", "access.key.id", "access_key_id",
+                "sharedAccessKeyName"}) {
+            Assert.assertFalse("A parameter named " + name + " identifies an access key but holds no secret",
                     Utils.isSecretParameter(name));
         }
     }
@@ -569,6 +580,30 @@ public class UtilsSecretMaskingTest {
                 maskedConfiguration.contains(SECRET));
         Assert.assertTrue("An inline endpoint named after a secret should keep its address",
                 maskedConfiguration.contains("http://localhost:8290/visibleTokenPath"));
+    }
+
+    @Test
+    public void testEmptyDedicatedSecretElementIsNotMasked() throws XMLStreamException {
+
+        OMElement sequence = AXIOMUtil.stringToOM(
+                "<sequence xmlns=\"http://ws.apache.org/ns/synapse\" name=\"DbSequence\">"
+                        + "<dblookup><connection><pool>"
+                        + "<driver>org.h2.Driver</driver><url>jdbc:h2:mem:test</url>"
+                        + "<user>sa</user><password/>"
+                        + "</pool></connection></dblookup>"
+                        + "<dblookup><connection><pool>"
+                        + "<user>dbuser</user><password>" + SECRET + "</password>"
+                        + "</pool></connection></dblookup>"
+                        + "</sequence>");
+
+        String maskedConfiguration = Utils.maskSecretsInConfiguration(sequence).toString();
+
+        Assert.assertTrue("An empty password should be returned as it is, rather than as a masked value",
+                maskedConfiguration.contains("<user>sa</user><password/>"));
+        Assert.assertFalse("A password which holds a value should still be masked",
+                maskedConfiguration.contains(SECRET));
+        Assert.assertTrue("The password which holds a value should be replaced with the masked value",
+                maskedConfiguration.contains("<password>" + PASSWORD_MASKED_VALUE + "</password>"));
     }
 
     @Test
