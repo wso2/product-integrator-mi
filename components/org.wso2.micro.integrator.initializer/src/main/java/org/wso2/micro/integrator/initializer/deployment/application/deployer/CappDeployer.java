@@ -209,6 +209,12 @@ public class CappDeployer extends AbstractDeployer {
     private ExecutorService initialServiceCatalogExecutor;
 
     /**
+     * Cached total count of CApps in the initial startup deployment batch,
+     * accounting for both top-level .car files and any embedded CAR files inside them.
+     */
+    private int startupBatchSize = -1;
+
+    /**
      * Map object to store Service Catalog configuration
      */
     private Map serviceCatalogConfiguration;
@@ -389,7 +395,8 @@ public class CappDeployer extends AbstractDeployer {
             }
         }
 
-        boolean isAllCAppsDeployed = getCAppFileList().length == cAppMap.size() + faultyCapps.size();
+        int batchSize = getStartupBatchSize();
+        boolean isAllCAppsDeployed = batchSize > 0 && (cAppMap.size() + faultyCapps.size()) >= batchSize;
 
         // Initial execution of Service catalog Deployer at server startup when last CApp get deployed.
         // isServiceCatalogStartupExecutionPending guards against multiple submissions.
@@ -1383,16 +1390,71 @@ public class CappDeployer extends AbstractDeployer {
      * Retrieves a list of Carbon Application (CApp) files from the CApps directory.
      *
      * This method scans the CApps folder within the Carbon repository location
-     * and returns all files with the ".car" extension (Carbon Archive files).
+     * (or the configured CApp directory) and returns all files with the ".car"
+     * extension (Carbon Archive files).
      *
      * @return an array of File objects representing all .car files found in the
-     *         CApps directory.
+     *         CApps directory, or an empty array if none found or folder unreadable.
      */
     private File[] getCAppFileList() {
-        FilenameFilter CAPP_FILTER = (f, name) -> name.endsWith(".car");
+        FilenameFilter CAPP_FILTER = (f, name) -> name.endsWith(CAR_FILE_EXTENSION);
 
-        File cappFolder = new File(((CarbonAxisConfigurator) axisConfig.getAxisConfiguration().getConfigurator())
-                .getRepoLocation(), CAPP_FOLDER_NAME);
-        return cappFolder.listFiles(CAPP_FILTER);
+        File cappFolder = null;
+        if (axisConfig != null && axisConfig.getAxisConfiguration() != null &&
+                axisConfig.getAxisConfiguration().getConfigurator() != null) {
+            cappFolder = new File(((CarbonAxisConfigurator) axisConfig.getAxisConfiguration().getConfigurator())
+                    .getRepoLocation(), CAPP_FOLDER_NAME);
+        } else if (this.cAppDir != null) {
+            cappFolder = new File(this.cAppDir);
+        }
+        if (cappFolder == null || !cappFolder.exists() || !cappFolder.isDirectory()) {
+            return new File[0];
+        }
+        File[] files = cappFolder.listFiles(CAPP_FILTER);
+        return files != null ? files : new File[0];
+    }
+
+    /**
+     * Calculates the total number of CApps in the initial startup deployment batch,
+     * including both top-level .car files and any embedded CAR files contained within them.
+     *
+     * @return the total count of CApps to be deployed at startup
+     */
+    int getStartupBatchSize() {
+        if (startupBatchSize != -1) {
+            return startupBatchSize;
+        }
+        File[] topLevelFiles = getCAppFileList();
+        if (topLevelFiles.length == 0) {
+            startupBatchSize = 0;
+            return 0;
+        }
+        int totalCount = topLevelFiles.length;
+        for (File carFile : topLevelFiles) {
+            if (!carFile.isFile()) {
+                continue;
+            }
+            try (ZipFile zipFile = new ZipFile(carFile)) {
+                long embeddedCount = zipFile.stream()
+                        .filter(e -> !e.isDirectory())
+                        .filter(e -> e.getName().startsWith(AppDeployerUtils.DEPENDENCIES_DIR))
+                        .filter(e -> e.getName().toLowerCase(Locale.ROOT).endsWith(CAR_FILE_EXTENSION))
+                        .count();
+                totalCount += (int) embeddedCount;
+            } catch (Exception e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Error inspecting CAR file for embedded dependencies: " + carFile.getName(), e);
+                }
+            }
+        }
+        startupBatchSize = totalCount;
+        return startupBatchSize;
+    }
+
+    /**
+     * Resets the cached startup batch size. Package-private for testing purposes.
+     */
+    void resetStartupBatchSize() {
+        this.startupBatchSize = -1;
     }
 }
