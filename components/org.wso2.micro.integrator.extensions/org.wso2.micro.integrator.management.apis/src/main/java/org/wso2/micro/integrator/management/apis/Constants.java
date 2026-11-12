@@ -147,6 +147,7 @@ public class Constants {
     public static final String ADMIN = "admin";
     public static final String PATTERN = "pattern";
     public static final String PASSWORD_MASKED_VALUE = "*****";
+    public static final String DEFAULT_VALUE = "defaultValue";
 
     public static final String USERNAME_PROPERTY = "USERNAME";
     public static final String IS_ADMIN_USER_PROPERTY = "IS_ADMIN_USER";
@@ -171,6 +172,7 @@ public class Constants {
     public static String FILE_BASED_USER_STORE_ENABLE = "internal_apis.file_user_store.enable";
     public static String MAKE_NON_ADMIN_USERS_READ_ONLY = "user_access.make_non_admin_users_read_only";
     public static String ALLOW_ANONYMOUS_USERS = "management_api.allow_anonymous_users";
+    public static final String SECRET_MASKING_ENABLED = "management_api.secret_masking.enabled";
 
     public static final String AUDIT_LOG_TYPE_ENDPOINT = "endpoint";
     public static final String AUDIT_LOG_TYPE_USER = "user";

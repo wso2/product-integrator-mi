@@ -1050,6 +1050,9 @@ enabled = true
 allowed_origins = "host1.com"
 allowed_headers = "SomeHeader"
 
+[management_api.secret_masking]
+enabled = true
+
 [management_api.basic_security_handler]
 enable = true
 

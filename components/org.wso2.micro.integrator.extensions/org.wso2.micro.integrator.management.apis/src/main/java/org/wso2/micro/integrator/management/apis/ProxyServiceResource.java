@@ -246,7 +246,8 @@ public class ProxyServiceResource extends APIResource {
         String tracingState = proxyService.getAspectConfiguration().isTracingEnabled() ? Constants.ENABLED : Constants.DISABLED;
         proxyObject.put(Constants.TRACING, tracingState);
 
-        OMElement proxyConfiguration = ProxyServiceSerializer.serializeProxy(null, proxyService);
+        OMElement proxyConfiguration =
+                Utils.maskSecretsInConfiguration(ProxyServiceSerializer.serializeProxy(null, proxyService));
         proxyObject.put(SYNAPSE_CONFIGURATION, proxyConfiguration.toString());
         proxyObject.put("eprs", proxyService.getAxisService().getEPRs());
         proxyObject.put("isRunning", proxyService.isRunning());

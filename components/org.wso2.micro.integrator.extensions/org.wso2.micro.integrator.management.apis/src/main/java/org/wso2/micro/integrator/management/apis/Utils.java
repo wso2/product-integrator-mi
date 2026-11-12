@@ -20,6 +20,8 @@ package org.wso2.micro.integrator.management.apis;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.apache.axiom.om.OMAttribute;
+import org.apache.axiom.om.OMElement;
 import org.apache.axiom.om.OMNode;
 import org.apache.axiom.om.impl.llom.OMTextImpl;
 import org.apache.axis2.AxisFault;
@@ -36,6 +38,7 @@ import org.json.JSONObject;
 import org.ops4j.pax.logging.PaxLoggingConstants;
 import org.osgi.service.cm.Configuration;
 import org.osgi.service.cm.ConfigurationAdmin;
+import org.wso2.config.mapper.ConfigParser;
 import org.wso2.micro.core.util.AuditLogger;
 import org.wso2.micro.integrator.initializer.utils.ConfigurationHolder;
 import org.wso2.micro.integrator.registry.MicroIntegratorRegistry;
@@ -56,11 +59,18 @@ import java.io.UnsupportedEncodingException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Dictionary;
 import java.util.Hashtable;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.wso2.micro.integrator.management.apis.Constants.BAD_REQUEST;
 import static org.wso2.micro.integrator.management.apis.Constants.COLLECTIONS_PROPERTY_EXTENSIONS;
@@ -81,6 +91,67 @@ import static org.wso2.micro.integrator.registry.MicroIntegratorRegistryConstant
 public class Utils {
 
     private static final Log LOG = LogFactory.getLog(Utils.class);
+
+    /**
+     * Fragments of artifact parameter names which indicate that the value of the parameter is a secret. A fragment
+     * which spans two words lists the separators a name may be spelled with, since {@code apiKey}, {@code api.key}
+     * and {@code api_key} all name the same parameter.
+     */
+    private static final String[] SECRET_PARAMETER_NAME_FRAGMENTS =
+            {Constants.PASSWORD, "secret", "credential", "token", "passphrase", "signature",
+             "apikey", "api.key", "api_key", "api-key",
+             "privatekey", "private.key", "private_key", "private-key",
+             "accesskey", "access.key", "access_key", "access-key"};
+
+    /**
+     * Fragments which carry one of the secret fragments but hold no secret, such as the {@code tokenUrl} of an OAuth
+     * configuration, the {@code allowCredentials} flag of a CORS handler or the {@code accessKeyId} which identifies
+     * an access key the way a user name identifies a user. Each is dropped from the name before the secret fragments
+     * are looked for, so that such a parameter stays visible through the management API. They are compound because a
+     * short fragment here would hide real secrets.
+     */
+    private static final String[] NON_SECRET_PARAMETER_NAME_FRAGMENTS =
+            {"allowcredentials",
+             "tokenurl", "token.url", "token_url", "token-url",
+             "tokenendpoint", "token.endpoint", "token_endpoint", "token-endpoint",
+             "tokentype", "token.type", "token_type", "token-type",
+             "signaturelength", "signaturealgorithm",
+             "passwordcallbackclass", "passwordtype",
+             "secretalias", "privatekeyalias",
+             "accesskeyid", "access.key.id", "access_key_id", "access-key-id", "accesskeyname"};
+
+    private static final QName NAME_ATTRIBUTE = new QName("name");
+    private static final QName KEY_ATTRIBUTE = new QName("key");
+    private static final QName VALUE_ATTRIBUTE = new QName("value");
+    private static final QName DEFAULT_VALUE_ATTRIBUTE = new QName(Constants.DEFAULT_VALUE);
+    private static final QName EXPRESSION_ATTRIBUTE = new QName("expression");
+
+    /**
+     * Attributes which hold the value of an element. The {@code defaultValue} of a sequence template parameter is the
+     * value the template uses when a caller does not pass the parameter, therefore it is as much a secret as a value.
+     */
+    private static final QName[] VALUE_ATTRIBUTES = {VALUE_ATTRIBUTE, DEFAULT_VALUE_ATTRIBUTE};
+
+    /**
+     * Elements which may carry their value as a child element, which is how a parameter or a property holding well
+     * formed XML is serialized.
+     */
+    private static final String[] XML_VALUE_ELEMENTS = {"parameter", "property"};
+
+    /**
+     * Matches the credentials of a URI such as {@code vfs:sftp://user:password@host/path}, which is how the VFS
+     * transport parameters of a proxy service carry the credentials of the remote file system. The password group
+     * accepts {@code @} and is matched greedily, so that the credentials of a URI which carries an unencoded
+     * {@code @} within the password are anchored on the last {@code @} and are therefore masked as a whole.
+     */
+    private static final Pattern URI_CREDENTIALS_PATTERN =
+            Pattern.compile("([a-zA-Z][a-zA-Z0-9+.\\-]*://[^/?#\\s:@]+):([^/?#\\s]+)@");
+
+    /**
+     * Expressions which resolve a secret at runtime. A value which holds one of these carries no secret, therefore it
+     * is left as it is so that the configured alias remains visible.
+     */
+    private static final String[] SECURE_VAULT_EXPRESSIONS = {"vault-lookup", "vault-decrypt", "$secret{"};
 
     public static String getQueryParameter(MessageContext messageContext, String key) {
 
@@ -750,5 +821,375 @@ public class Utils {
             return correctedPath.substring(correctedPath.lastIndexOf(URL_SEPARATOR) + 1, correctedPath.length());
         }
         return "";
+    }
+
+    /**
+     * Checks whether the secrets of an artifact configuration should be masked before it is returned. Masking is
+     * enabled unless a deployment turns it off through {@code [management_api.secret_masking] enabled = false}, so
+     * that masking applies by default and only a deployment which opts out is served the configuration as it is.
+     * Masking is also kept on for a value which is not an explicit false, so that a mistyped value masks rather than
+     * exposes the secrets.
+     *
+     * @return true if the secrets of a configuration have to be masked
+     */
+    public static boolean isSecretMaskingEnabled() {
+        Map<String, Object> parsedConfigs = ConfigParser.getParsedConfigs();
+        if (parsedConfigs == null) {
+            return true;
+        }
+        Object maskingEnabled = parsedConfigs.get(Constants.SECRET_MASKING_ENABLED);
+        if (maskingEnabled == null) {
+            return true;
+        }
+        // The masking is turned off only by an explicit false, which a deployment.toml may quote, so that a value
+        // which is mistyped keeps the secrets masked instead of exposing them.
+        return !Boolean.FALSE.toString().equalsIgnoreCase(String.valueOf(maskingEnabled).trim());
+    }
+
+    /**
+     * Checks whether the given artifact parameter holds a secret which should not be exposed via the management API.
+     * The decision is based only on the name of the parameter, since the resolved value of a parameter carries no
+     * indication of whether it is a secret.
+     *
+     * @param parameterName name of the artifact parameter
+     * @return true if the value of the parameter has to be masked
+     */
+    public static boolean isSecretParameter(String parameterName) {
+        if (parameterName == null) {
+            return false;
+        }
+        String normalizedName = parameterName.toLowerCase(Locale.ENGLISH);
+        // Only the matched fragment is dropped, so a name such as smtp.allowCredentials.password stays masked.
+        for (String nonSecretNameFragment : NON_SECRET_PARAMETER_NAME_FRAGMENTS) {
+            normalizedName = normalizedName.replace(nonSecretNameFragment, "");
+        }
+        for (String secretNameFragment : SECRET_PARAMETER_NAME_FRAGMENTS) {
+            if (normalizedName.contains(secretNameFragment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    /**
+     * Returns the value of the given artifact parameter with its secrets masked. The value is masked as a whole when
+     * the name of the parameter denotes a secret. Otherwise only the credentials carried by a URI are masked, since a
+     * parameter such as {@code transport.vfs.FileURI} holds the credentials of the remote file system within the URI
+     * and therefore cannot be detected using the name of the parameter. A value which is not a string is returned as
+     * it is, since only a string can carry a URI.
+     * <p>
+     * The value is returned as it is when a deployment turns the secret masking off.
+     *
+     * @param parameterName name of the artifact parameter
+     * @param value         value of the artifact parameter
+     * @return the masked value, or the given value when it carries no secret or the masking is turned off
+     */
+    public static Object maskSecretValue(String parameterName, Object value) {
+        if (!isSecretMaskingEnabled()) {
+            return value;
+        }
+        if (isSecretParameter(parameterName)) {
+            return Constants.PASSWORD_MASKED_VALUE;
+        }
+        if (!(value instanceof String)) {
+            return value;
+        }
+        String maskedValue = maskCredentialsInUri((String) value);
+        return maskedValue != null ? maskedValue : value;
+    }
+
+    /**
+     * Returns a copy of the given parameter map where the secrets held by the parameters are masked, unless a
+     * deployment turns the secret masking off. The given map is never modified since artifacts return the live
+     * parameter map used at runtime, and a copy is returned whether or not the masking is turned off.
+     *
+     * @param parameters artifact parameters
+     * @return a copy of the given parameters, masked unless the masking is turned off
+     */
+    public static Map<String, Object> maskSecretParameters(Map<String, ?> parameters) {
+        if (parameters == null) {
+            return null;
+        }
+        Map<String, Object> maskedParameters = new LinkedHashMap<>(parameters);
+        maskedParameters.replaceAll(Utils::maskSecretValue);
+        return maskedParameters;
+    }
+
+    /**
+     * Returns the json representation of the parameters of a sequence template where the default value of a secret
+     * parameter is masked, unless a deployment turns the secret masking off. A default value is the value a template
+     * uses when a caller does not pass the parameter, so the default value of a parameter such as {@code password} is
+     * the secret itself. The json representation is built as a copy, hence the parameters used at runtime are never
+     * modified.
+     *
+     * @param parameters parameters of a sequence template
+     * @return the json representation of the given parameters, masked unless the masking is turned off
+     */
+    public static JSONArray maskSecretTemplateParameters(Collection<?> parameters) {
+        if (parameters == null) {
+            return null;
+        }
+        JSONArray parametersJson = new JSONArray(parameters);
+        if (!isSecretMaskingEnabled()) {
+            return parametersJson;
+        }
+        for (int i = 0; i < parametersJson.length(); i++) {
+            JSONObject parameter = parametersJson.optJSONObject(i);
+            if (parameter != null && parameter.has(Constants.DEFAULT_VALUE)
+                    && isSecretParameter(parameter.optString(Constants.NAME, null))) {
+                parameter.put(Constants.DEFAULT_VALUE, Constants.PASSWORD_MASKED_VALUE);
+            }
+        }
+        return parametersJson;
+    }
+
+    /**
+     * Returns a copy of the given json representation of an artifact where the secret values are masked, unless a
+     * deployment turns the secret masking off. A secret is either the value of a field whose name denotes a secret,
+     * or the credentials carried by a URI such as the address of an endpoint. The given object is never modified,
+     * since artifacts cache and reuse it, and a copy is returned whether or not the masking is turned off.
+     *
+     * @param artifactJson json representation of an artifact
+     * @return a copy of the given json representation, masked unless the masking is turned off
+     */
+    public static JSONObject maskSecretsInJson(JSONObject artifactJson) {
+        if (artifactJson == null) {
+            return null;
+        }
+        JSONObject maskedJson = new JSONObject(artifactJson.toString());
+        maskSecretsInJsonObject(maskedJson);
+        return maskedJson;
+    }
+
+    /**
+     * Masks the secret values held by the given json object and by every object nested under it.
+     *
+     * @param jsonObject json object to be masked
+     */
+    private static void maskSecretsInJsonObject(JSONObject jsonObject) {
+        for (String key : new ArrayList<>(jsonObject.keySet())) {
+            Object value = jsonObject.get(key);
+            if (value instanceof JSONObject) {
+                maskSecretsInJsonObject((JSONObject) value);
+            } else if (value instanceof JSONArray) {
+                maskSecretsInJsonArray((JSONArray) value);
+            } else if (value instanceof String) {
+                jsonObject.put(key, maskSecretValue(key, value));
+            }
+        }
+    }
+
+    /**
+     * Masks the secret values held by the objects of the given json array.
+     *
+     * @param jsonArray json array to be masked
+     */
+    private static void maskSecretsInJsonArray(JSONArray jsonArray) {
+        for (int i = 0; i < jsonArray.length(); i++) {
+            Object value = jsonArray.get(i);
+            if (value instanceof JSONObject) {
+                maskSecretsInJsonObject((JSONObject) value);
+            } else if (value instanceof JSONArray) {
+                maskSecretsInJsonArray((JSONArray) value);
+            }
+        }
+    }
+
+    /**
+     * Masks the values of all the secret parameters of an artifact configuration. Parameters which are resolved via
+     * a registry key are left untouched since their values are not serialized into the configuration.
+     * <p>
+     * The given element is copied before it is masked, so an element owned by the synapse configuration can be
+     * passed. Dropping that copy would make the masked value the one used at runtime.
+     * <p>
+     * The element is returned as it is when a deployment turns the secret masking off, since the configuration of an
+     * artifact is the source a management API client was served unmasked before the secrets were masked.
+     *
+     * @param artifactElement artifact configuration
+     * @return a masked copy of the given element, or the given element when the masking is turned off
+     */
+    public static OMElement maskSecretsInConfiguration(OMElement artifactElement) {
+        if (artifactElement == null) {
+            return null;
+        }
+        if (!isSecretMaskingEnabled()) {
+            return artifactElement;
+        }
+        // The copy keeps the masking away from an element which is owned by the synapse configuration.
+        OMElement maskedElement = artifactElement.cloneOMElement();
+        // The given element is masked as well as the ones underneath it, since the inline value of a local entry,
+        // such as <password>...</password>, can be a secret by itself.
+        maskSecretElement(maskedElement);
+        return maskedElement;
+    }
+
+    /**
+     * Masks the given element when it holds a secret. Otherwise masks the credentials carried by its URIs and walks
+     * the elements underneath it.
+     *
+     * @param element element to be masked
+     */
+    private static void maskSecretElement(OMElement element) {
+        if (isSecretElement(element)) {
+            maskElementValue(element);
+            return;
+        }
+        maskCredentialsInUris(element);
+        for (OMNode child = element.getFirstOMChild(); child != null; child = child.getNextOMSibling()) {
+            if (child instanceof OMElement) {
+                maskSecretElement((OMElement) child);
+            }
+        }
+    }
+
+    /**
+     * Checks whether the given element holds a secret. This covers the shapes used across the synapse artifacts, which
+     * are a named parameter such as {@code <parameter name="solace.password">}, a named property such as
+     * {@code <property name="db.password" value="..."/>} and a dedicated element such as the {@code <password>} of a
+     * database mediator or the {@code <clientSecret>} of an OAuth endpoint.
+     *
+     * @param element element to be inspected
+     * @return true if the value of the element has to be masked
+     */
+    private static boolean isSecretElement(OMElement element) {
+        if (element.getAttributeValue(KEY_ATTRIBUTE) != null
+                || element.getAttributeValue(EXPRESSION_ATTRIBUTE) != null) {
+            // The value is either resolved through the registry or evaluated at runtime, hence the configuration
+            // carries no secret.
+            return false;
+        }
+        if (isSecretParameter(element.getAttributeValue(NAME_ATTRIBUTE)) && holdsValue(element)) {
+            return true;
+        }
+        // A dedicated element such as <password> or <clientSecret> holds the secret by itself, whereas an element
+        // such as <clientCredentials> only groups other elements and therefore has to be inspected further. An empty
+        // one, such as the <password/> of a database which has none, has no value to be masked.
+        return element.getFirstElement() == null && isSecretParameter(element.getLocalName())
+                && holdsValue(element);
+    }
+
+    /**
+     * Checks whether the given element carries a value of its own. An element which is named after a secret is masked
+     * only when it does, since a mediator or an inline endpoint such as {@code <class name="...TokenValidator">} or
+     * {@code <endpoint name="TokenServiceEP">} is also named, but holds a configuration which has to be inspected
+     * further instead of being replaced as a whole. Likewise a template parameter which only declares a name has no
+     * value to be masked.
+     *
+     * @param element element to be inspected
+     * @return true if the element carries a value
+     */
+    private static boolean holdsValue(OMElement element) {
+        for (QName valueAttribute : VALUE_ATTRIBUTES) {
+            if (element.getAttribute(valueAttribute) != null) {
+                return true;
+            }
+        }
+        if (element.getFirstElement() == null) {
+            return StringUtils.isNotBlank(element.getText());
+        }
+        for (String xmlValueElement : XML_VALUE_ELEMENTS) {
+            if (xmlValueElement.equals(element.getLocalName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Replaces the value of the given element with {@link Constants#PASSWORD_MASKED_VALUE}. A value held by an
+     * attribute is masked in place. Otherwise the existing value is dropped first, since a parameter value can also be
+     * serialized as a child element when it is well formed XML.
+     *
+     * @param element element whose value should be masked
+     */
+    private static void maskElementValue(OMElement element) {
+        boolean maskedAnAttribute = false;
+        for (QName valueAttributeName : VALUE_ATTRIBUTES) {
+            OMAttribute valueAttribute = element.getAttribute(valueAttributeName);
+            if (valueAttribute != null) {
+                valueAttribute.setAttributeValue(Constants.PASSWORD_MASKED_VALUE);
+                maskedAnAttribute = true;
+            }
+        }
+        if (maskedAnAttribute) {
+            return;
+        }
+        OMNode valueNode = element.getFirstOMChild();
+        while (valueNode != null) {
+            OMNode nextValueNode = valueNode.getNextOMSibling();
+            valueNode.detach();
+            valueNode = nextValueNode;
+        }
+        element.setText(Constants.PASSWORD_MASKED_VALUE);
+    }
+
+    /**
+     * Masks the credentials carried by any URI of the given element. The credentials of a remote file system are
+     * configured as a part of the URI, therefore they cannot be detected using the name of the parameter.
+     *
+     * @param element element to be inspected
+     */
+    private static void maskCredentialsInUris(OMElement element) {
+        Iterator<?> attributes = element.getAllAttributes();
+        while (attributes.hasNext()) {
+            OMAttribute attribute = (OMAttribute) attributes.next();
+            String maskedValue = maskCredentialsInUri(attribute.getAttributeValue());
+            if (maskedValue != null) {
+                attribute.setAttributeValue(maskedValue);
+            }
+        }
+        if (element.getFirstElement() == null) {
+            String maskedText = maskCredentialsInUri(element.getText());
+            if (maskedText != null) {
+                element.setText(maskedText);
+            }
+        }
+    }
+
+    /**
+     * Masks the credentials of the given URI. Credentials which resolve their password through a secure vault
+     * expression are left as they are. The expression is looked for only within the password of each URI, since a
+     * value which carries an expression elsewhere, such as in its query, can still carry a password in plain text.
+     *
+     * @param value value which may be a URI
+     * @return the masked URI, or null if the given value carries no credentials to be masked
+     */
+    private static String maskCredentialsInUri(String value) {
+        if (StringUtils.isEmpty(value)) {
+            return null;
+        }
+        Matcher matcher = URI_CREDENTIALS_PATTERN.matcher(value);
+        StringBuffer maskedValue = new StringBuffer();
+        boolean masked = false;
+        while (matcher.find()) {
+            String credentials = matcher.group();
+            if (!containsSecureVaultExpression(matcher.group(2))) {
+                credentials = matcher.group(1) + ":" + Constants.PASSWORD_MASKED_VALUE + "@";
+                masked = true;
+            }
+            matcher.appendReplacement(maskedValue, Matcher.quoteReplacement(credentials));
+        }
+        if (!masked) {
+            return null;
+        }
+        matcher.appendTail(maskedValue);
+        return maskedValue.toString();
+    }
+
+    /**
+     * Checks whether the given value resolves its secret at runtime, in which case the configured value is not a
+     * secret by itself.
+     *
+     * @param value value to be inspected
+     * @return true if the value holds a secure vault expression
+     */
+    private static boolean containsSecureVaultExpression(String value) {
+        for (String expression : SECURE_VAULT_EXPRESSIONS) {
+            if (value.contains(expression)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

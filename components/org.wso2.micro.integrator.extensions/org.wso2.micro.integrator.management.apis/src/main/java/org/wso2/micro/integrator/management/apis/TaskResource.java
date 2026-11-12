@@ -237,7 +237,7 @@ public class TaskResource extends APIResource {
      * @param xmlProperties xml property set
      * @return Map
      */
-    private Map getProperties(Set xmlProperties) {
+    private Map<String, String> getProperties(Set<OMElement> xmlProperties) {
         Map<String, String> properties = new HashMap<>();
         Iterator<OMElement> propertiesItr = xmlProperties.iterator();
 
@@ -291,8 +291,9 @@ public class TaskResource extends APIResource {
             taskObject.put("triggerInterval", String.valueOf(task.getInterval()));
         }
         taskObject.put("triggerType", triggerType);
-        taskObject.put("properties", getProperties(task.getXmlProperties()));
-        taskObject.put(Constants.SYNAPSE_CONFIGURATION, TaskDescriptionSerializer.serializeTaskDescription(null, task));
+        taskObject.put("properties", Utils.maskSecretParameters(getProperties(task.getXmlProperties())));
+        taskObject.put(Constants.SYNAPSE_CONFIGURATION, Utils.maskSecretsInConfiguration(
+                TaskDescriptionSerializer.serializeTaskDescription(null, task)));
 
         return taskObject;
     }
