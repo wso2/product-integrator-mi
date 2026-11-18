@@ -142,4 +142,42 @@ public interface MetricReporter {
      * @param serviceType Service Type
      */
     void serviceDown(String serviceName, String serviceType);
+
+    /**
+     * Registers a counter or a gauge of a component under the metric name itself. A name that is registered
+     * with the same type and the same label names is used again. The reporter keeps its own copy of the label
+     * names. Use names owned by the component. Server lookup keys, process metrics and JVM metrics are
+     * reserved, including before server initialization.
+     * <p>
+     * The answer false does not always mean that the reporter has no support. A reporter with support also
+     * answers false, and registers nothing, for a type that is not a counter or a gauge, for a name that a
+     * component registered with another type or other label names, and for a name that a metric of the server
+     * uses. A null argument, a name or a label name that the metric library does not accept, and a name that
+     * other code registered in the metric library can raise an exception of that library.
+     *
+     * @param type       The type of metric, Counter or Gauge
+     * @param metricName Metric name
+     * @param metricHelp Metric description
+     * @param labelNames Metric label names
+     * @return true when the metric is registered or used again, false when it is not registered
+     */
+    default boolean createComponentMetric(String type, String metricName, String metricHelp, String[] labelNames) {
+        return false;
+    }
+
+    /**
+     * Sets a gauge that createComponentMetric registered. The reporter keeps its own copy of the label values.
+     * <p>
+     * A reporter with support also answers false, and sets nothing, for a name that is not such a gauge, for
+     * a null label array, and for a number of label values that differs from the number of label names.
+     * Use an empty array for a gauge without labels. A null label value can raise a library exception.
+     *
+     * @param metricName  Metric name
+     * @param labelValues Metric label values, one for each label name
+     * @param value       The value of the gauge
+     * @return true when the gauge is set, false when it is not set
+     */
+    default boolean setGauge(String metricName, String[] labelValues, double value) {
+        return false;
+    }
 }
