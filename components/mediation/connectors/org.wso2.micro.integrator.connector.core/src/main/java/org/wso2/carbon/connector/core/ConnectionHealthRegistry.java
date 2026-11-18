@@ -25,7 +25,9 @@ import java.util.function.Supplier;
 
 /**
  * Health of connector connections, for the management API. A connector registers the health of each connection
- * and unregisters it by identity. So an older connection never unregisters the newer one of the same name.
+ * and unregisters it with the same supplier object. Each connection lifetime must own a distinct supplier,
+ * including when it shares health state with a previous connection of the same name.
+ * Health values are strings, booleans, finite numbers, maps and lists of these values.
  */
 public final class ConnectionHealthRegistry {
 

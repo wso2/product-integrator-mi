@@ -18,7 +18,14 @@
 
 package org.wso2.micro.integrator.management.apis;
 
+import com.google.gson.JsonObject;
+import org.apache.axiom.om.OMAbstractFactory;
+import org.apache.axis2.context.ConfigurationContext;
+import org.apache.axis2.context.MessageContext;
+import org.apache.axis2.engine.AxisConfiguration;
 import org.apache.synapse.aspects.AspectConfiguration;
+import org.apache.synapse.config.SynapseConfiguration;
+import org.apache.synapse.core.axis2.Axis2MessageContext;
 import org.apache.synapse.inbound.InboundEndpoint;
 import org.json.JSONObject;
 import org.junit.After;
@@ -37,6 +44,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 public class InboundEndpointResourceHealthTest {
@@ -130,6 +138,13 @@ public class InboundEndpointResourceHealthTest {
     }
 
     @Test
+    public void testUnreadableNestedHealthFallsBackInListAndDetail() throws Exception {
+        GenericPollingConsumerRegistry.register(NAME,
+                new HealthPollingConsumer(() -> Map.of(Constants.STATUS, "failed", "pool", failingHealth())));
+        assertFallback();
+    }
+
+    @Test
     public void testEventBasedHealthThatCanNotBePrintedGivesNoHealth() throws Exception {
         Map<String, Object> eventHealth = new HashMap<>();
         eventHealth.put(Constants.STATUS, "connected");
@@ -145,10 +160,15 @@ public class InboundEndpointResourceHealthTest {
 
     @Test
     public void testStatusAndHealthOfAPollingConsumerComeFromOneCopy() throws Exception {
-        GenericPollingConsumerRegistry.register(NAME,
-                new HealthPollingConsumer(InboundEndpointResourceHealthTest::changingHealth));
-
+        AtomicInteger calls = new AtomicInteger();
+        GenericPollingConsumerRegistry.register(NAME, new HealthPollingConsumer(() -> {
+            calls.incrementAndGet();
+            return changingHealth();
+        }));
         JSONObject inbound = convert(inboundEndpoint());
+        Assert.assertEquals(1, calls.getAndSet(0));
+        listStatus();
+        Assert.assertEquals(1, calls.get());
         Assert.assertEquals("The status and the health show the same state",
                 inbound.getJSONObject("health").getString(Constants.STATUS), inbound.getString(Constants.STATUS));
     }
@@ -224,14 +244,20 @@ public class InboundEndpointResourceHealthTest {
         return (JSONObject) lookup.invoke(new InboundEndpointResource("/inbound-endpoints"), inboundEndpoint);
     }
 
-    // The status of the entry of the list, taken as the list takes it.
     private static String listStatus() throws Exception {
-        Method state = InboundEndpointResource.class.getDeclaredMethod("getInboundEndpointState",
-                InboundEndpoint.class, JSONObject.class);
-        state.setAccessible(true);
-        InboundEndpoint inboundEndpoint = inboundEndpoint();
-        return (String) state.invoke(new InboundEndpointResource("/inbound-endpoints"), inboundEndpoint,
-                consumerHealth(inboundEndpoint));
+        SynapseConfiguration config = new SynapseConfiguration();
+        config.addInboundEndpoint(NAME, inboundEndpoint());
+        MessageContext axis = new MessageContext();
+        axis.setConfigurationContext(new ConfigurationContext(new AxisConfiguration()));
+        axis.setEnvelope(OMAbstractFactory.getSOAP11Factory().getDefaultEnvelope());
+        Axis2MessageContext context = new Axis2MessageContext(axis, config, null);
+        Method list = InboundEndpointResource.class.getDeclaredMethod("populateInboundEndpointList",
+                org.apache.synapse.MessageContext.class);
+        list.setAccessible(true);
+        list.invoke(new InboundEndpointResource("/inbound-endpoints"), context);
+        JsonObject entry = Utils.getJsonPayload(axis).getAsJsonArray(Constants.LIST).get(0).getAsJsonObject();
+        Assert.assertEquals(NAME, entry.get(Constants.NAME).getAsString());
+        return entry.get(Constants.STATUS).getAsString();
     }
 
     private static class HealthPollingConsumer extends GenericPollingConsumer {

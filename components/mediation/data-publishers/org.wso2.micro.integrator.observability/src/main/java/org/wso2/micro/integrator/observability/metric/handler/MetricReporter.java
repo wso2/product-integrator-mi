@@ -146,7 +146,8 @@ public interface MetricReporter {
     /**
      * Registers a counter or a gauge of a component under the metric name itself. A name that is registered
      * with the same type and the same label names is used again. The reporter keeps its own copy of the label
-     * names.
+     * names. Use names owned by the component. Server lookup keys, process metrics and JVM metrics are
+     * reserved, including before server initialization.
      * <p>
      * The answer false does not always mean that the reporter has no support. A reporter with support also
      * answers false, and registers nothing, for a type that is not a counter or a gauge, for a name that a
@@ -168,8 +169,8 @@ public interface MetricReporter {
      * Sets a gauge that createComponentMetric registered. The reporter keeps its own copy of the label values.
      * <p>
      * A reporter with support also answers false, and sets nothing, for a name that is not such a gauge, for
-     * no label values, and for a number of label values that differs from the number of label names. A null
-     * label value can raise an exception of the metric library.
+     * a null label array, and for a number of label values that differs from the number of label names.
+     * Use an empty array for a gauge without labels. A null label value can raise a library exception.
      *
      * @param metricName  Metric name
      * @param labelValues Metric label values, one for each label name

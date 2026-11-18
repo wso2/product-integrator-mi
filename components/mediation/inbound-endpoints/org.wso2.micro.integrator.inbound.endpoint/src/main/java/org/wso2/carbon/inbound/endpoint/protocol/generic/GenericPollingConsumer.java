@@ -88,6 +88,7 @@ public abstract class GenericPollingConsumer {
 
     /**
      * Health of the consumer for the management API. The default has no health to report.
+     * Health values are strings, booleans, finite numbers, maps and lists of these values.
      *
      * @return the health map, or null when the consumer does not report health
      */

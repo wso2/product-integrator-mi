@@ -35,6 +35,7 @@ import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.rest.RESTConstants;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.json.ParserConfiguration;
 import org.ops4j.pax.logging.PaxLoggingConstants;
 import org.osgi.service.cm.Configuration;
 import org.osgi.service.cm.ConfigurationAdmin;
@@ -213,9 +214,40 @@ public class Utils {
      * @return the copy
      */
     static JSONObject copyHealth(Map<String, Object> health) {
-        JSONObject copy = new JSONObject(health);
+        JSONObject copy = (JSONObject) copyHealthValue(health, 0);
         copy.toString(0);
         return copy;
+    }
+
+    private static Object copyHealthValue(Object value, int depth) {
+        // JSONObject(Map) can turn an exception from reading a nested map into a JSON null.
+        if (value instanceof Map<?, ?> map) {
+            checkHealthDepth(depth);
+            JSONObject object = new JSONObject();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = Objects.requireNonNull(entry.getKey()).toString();
+                Object field = entry.getValue();
+                if (field != null) {
+                    object.put(key, copyHealthValue(field, depth + 1));
+                }
+            }
+            return object;
+        }
+        if (value instanceof List<?> list) {
+            checkHealthDepth(depth);
+            JSONArray array = new JSONArray();
+            for (Object item : list) {
+                array.put(copyHealthValue(item, depth + 1));
+            }
+            return array;
+        }
+        return JSONObject.wrap(value);
+    }
+
+    private static void checkHealthDepth(int depth) {
+        if (depth > ParserConfiguration.DEFAULT_MAXIMUM_NESTING_DEPTH) {
+            throw new IllegalArgumentException("Health data exceeds the JSON nesting limit");
+        }
     }
 
     public static void setJsonPayLoad(org.apache.axis2.context.MessageContext axis2MessageContext, Object jsonObject) {

@@ -31,8 +31,10 @@ import java.util.AbstractMap;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 public class ConnectorResourceHealthTest {
@@ -139,10 +141,28 @@ public class ConnectorResourceHealthTest {
     }
 
     @Test
-    public void testStatusAndHealthComeFromOneCopy() throws Exception {
-        register("c1", ConnectorResourceHealthTest::changingHealth);
-
+    public void testUnreadableMapInsideAListGivesTheNameOnly() throws Exception {
+        register("broken", () -> Map.of("status", "active", "pools", List.of(failingHealth())));
+        register("healthy", health("active", 5L));
         for (JSONObject entry : new JSONObject[]{listEntry(), singleEntry()}) {
+            JSONArray connections = entry.getJSONArray("connections");
+            assertNameOnly(connections.getJSONObject(0), "broken");
+            Assert.assertEquals(5L, connections.getJSONObject(1).getJSONObject("health").getLong("filesDone"));
+        }
+    }
+
+    @Test
+    public void testStatusAndHealthComeFromOneCopy() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        register("c1", () -> {
+            calls.incrementAndGet();
+            return changingHealth();
+        });
+        JSONObject list = listEntry();
+        Assert.assertEquals(1, calls.getAndSet(0));
+        JSONObject detail = singleEntry();
+        Assert.assertEquals(1, calls.get());
+        for (JSONObject entry : new JSONObject[]{list, detail}) {
             JSONObject connection = entry.getJSONArray("connections").getJSONObject(0);
             Assert.assertEquals("The status and the health show the same state",
                     connection.getJSONObject("health").getString("status"), connection.getString("status"));

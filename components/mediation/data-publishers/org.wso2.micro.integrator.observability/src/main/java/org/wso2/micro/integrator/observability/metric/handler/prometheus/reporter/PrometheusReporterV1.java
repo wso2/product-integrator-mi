@@ -18,6 +18,7 @@
 package org.wso2.micro.integrator.observability.metric.handler.prometheus.reporter;
 
 import io.prometheus.metrics.instrumentation.jvm.JvmMetrics;
+import io.prometheus.metrics.model.snapshots.PrometheusNaming;
 import io.prometheus.metrics.core.metrics.Gauge;
 import io.prometheus.metrics.core.metrics.Histogram;
 import io.prometheus.metrics.core.metrics.Counter;
@@ -339,6 +340,13 @@ public class PrometheusReporterV1 implements MetricReporter {
                         + type + " with the labels " + Arrays.toString(labels) + ".");
             }
             return false;
+        }
+        // The client checks these names together only when it collects the first series.
+        Set<String> names = new HashSet<>();
+        for (String label : labels) {
+            if (!names.add(PrometheusNaming.prometheusName(label))) {
+                throw new IllegalArgumentException("Duplicate metric label name: " + label);
+            }
         }
         Object metric;
         if (MetricConstants.COUNTER.equals(type)) {
