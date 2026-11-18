@@ -18,6 +18,7 @@
 
 package org.wso2.micro.integrator.management.apis;
 
+import org.apache.commons.lang3.math.Fraction;
 import org.apache.synapse.libraries.model.SynapseLibrary;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -27,6 +28,7 @@ import org.junit.Test;
 import org.wso2.carbon.connector.core.ConnectionHealthRegistry;
 
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
 import java.util.AbstractMap;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
@@ -167,6 +169,22 @@ public class ConnectorResourceHealthTest {
             JSONObject connection = entry.getJSONArray("connections").getJSONObject(0);
             Assert.assertEquals("The status and the health show the same state",
                     connection.getJSONObject("health").getString("status"), connection.getString("status"));
+        }
+    }
+
+    @Test
+    public void testFailedConnectionWithFractionalHealth() throws Exception {
+        BigDecimal exact = new BigDecimal("0.12345678901234567890123456789");
+        register("c1", () -> Map.of("status", "failed", "ratio", Fraction.ONE_HALF, "exact", exact));
+
+        for (JSONObject entry : new JSONObject[]{listEntry(), singleEntry()}) {
+            JSONObject connection = new JSONObject(entry.toString(0)).getJSONArray("connections").getJSONObject(0);
+            Assert.assertEquals("failed", connection.getString("status"));
+            JSONObject health = connection.getJSONObject("health");
+            Assert.assertEquals("failed", health.getString("status"));
+            Assert.assertTrue(health.get("ratio") instanceof Number);
+            Assert.assertEquals(0.5, health.getDouble("ratio"), 0.0);
+            Assert.assertEquals(exact, health.get("exact"));
         }
     }
 

@@ -58,6 +58,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -242,12 +243,27 @@ public class Utils {
             }
             return array;
         }
-        Object wrapped = JSONObject.wrap(value);
-        if (value instanceof Number && !(wrapped instanceof Number)) {
-            // JSON wraps atomic counters as strings. Keep the sampled value and its precision.
-            return new BigDecimal(wrapped instanceof String text ? text : value.toString());
+        if (value instanceof Number number) {
+            return copyHealthNumber(number);
         }
-        return wrapped;
+        return JSONObject.wrap(value);
+    }
+
+    private static Number copyHealthNumber(Number number) {
+        if (number instanceof Byte || number instanceof Short || number instanceof Integer || number instanceof Long
+                || number instanceof Float || number instanceof Double || number instanceof BigInteger
+                || number instanceof BigDecimal) {
+            return number;
+        }
+        try {
+            // Sample decimal representations directly so large atomic counters keep their precision.
+            return new BigDecimal(number.toString());
+        } catch (NumberFormatException e) {
+            // A fraction can print as 1/2 even though its numeric value is valid JSON.
+            double value = number.doubleValue();
+            JSONObject.testValidity(value);
+            return value;
+        }
     }
 
     private static void checkHealthDepth(int depth) {

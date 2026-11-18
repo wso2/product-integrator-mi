@@ -23,6 +23,7 @@ import org.apache.axiom.om.OMAbstractFactory;
 import org.apache.axis2.context.ConfigurationContext;
 import org.apache.axis2.context.MessageContext;
 import org.apache.axis2.engine.AxisConfiguration;
+import org.apache.commons.lang3.math.Fraction;
 import org.apache.synapse.aspects.AspectConfiguration;
 import org.apache.synapse.config.SynapseConfiguration;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
@@ -45,6 +46,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.DoubleAdder;
 import java.util.function.Supplier;
 
 public class InboundEndpointResourceHealthTest {
@@ -117,6 +119,29 @@ public class InboundEndpointResourceHealthTest {
         Assert.assertEquals("With no health the status is the one of the endpoint", fallbackStatus(),
                 inbound.getString(Constants.STATUS));
         Assert.assertFalse(inbound.has("health"));
+    }
+
+    @Test
+    public void testFailedPollingConsumerWithFractionalHealth() throws Exception {
+        GenericPollingConsumerRegistry.register(NAME, new HealthPollingConsumer(
+                () -> Map.of(Constants.STATUS, "failed", "ratio", Fraction.ONE_HALF)));
+
+        Assert.assertEquals("failed", listStatus());
+        JSONObject inbound = new JSONObject(convert(inboundEndpoint()).toString(0));
+        Assert.assertEquals("failed", inbound.getString(Constants.STATUS));
+        JSONObject health = inbound.getJSONObject("health");
+        Assert.assertEquals("failed", health.getString(Constants.STATUS));
+        Assert.assertTrue(health.get("ratio") instanceof Number);
+        Assert.assertEquals(0.5, health.getDouble("ratio"), 0.0);
+    }
+
+    @Test
+    public void testNonfiniteNumericConversionStillFallsBack() throws Exception {
+        DoubleAdder rate = new DoubleAdder();
+        rate.add(Double.NEGATIVE_INFINITY);
+        GenericPollingConsumerRegistry.register(NAME,
+                new HealthPollingConsumer(() -> Map.of(Constants.STATUS, "failed", "rate", rate)));
+        assertFallback();
     }
 
     @Test
