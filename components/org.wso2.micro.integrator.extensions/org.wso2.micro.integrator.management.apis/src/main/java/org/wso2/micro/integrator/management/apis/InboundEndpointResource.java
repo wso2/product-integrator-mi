@@ -180,7 +180,7 @@ public class InboundEndpointResource extends APIResource {
 
             inboundObject.put(Constants.NAME, inboundEndpoint.getName());
             inboundObject.put("protocol", inboundEndpoint.getProtocol());
-            Map<String, Object> health = getConsumerHealth(inboundEndpoint);
+            JSONObject health = getConsumerHealth(inboundEndpoint);
             inboundObject.put(Constants.STATUS, getInboundEndpointState(inboundEndpoint, health));
 
             jsonBody.getJSONArray(Constants.LIST).put(inboundObject);
@@ -221,10 +221,10 @@ public class InboundEndpointResource extends APIResource {
         inboundObject.put("protocol", inboundEndpoint.getProtocol());
         inboundObject.put("sequence", inboundEndpoint.getInjectingSeq());
         inboundObject.put("error", inboundEndpoint.getOnErrorSeq());
-        Map<String, Object> health = getConsumerHealth(inboundEndpoint);
+        JSONObject health = getConsumerHealth(inboundEndpoint);
         inboundObject.put(Constants.STATUS, getInboundEndpointState(inboundEndpoint, health));
         if (health != null) {
-            inboundObject.put("health", new JSONObject(health));
+            inboundObject.put("health", health);
         }
 
         String statisticState = inboundEndpoint.getAspectConfiguration().isStatisticsEnable() ? Constants.ENABLED : Constants.DISABLED;
@@ -261,11 +261,11 @@ public class InboundEndpointResource extends APIResource {
      *         - {@code INACTIVE_STATUS} if the inbound endpoint is deactivated.
      *         - {@code ACTIVE_STATUS} otherwise.
      */
-    private String getInboundEndpointState(InboundEndpoint inboundEndpoint, Map<String, Object> health) {
-        // health is the one map the caller read for this endpoint, so status and health describe the same instant.
-        if (health != null && health.get(Constants.STATUS) instanceof String) {
+    private String getInboundEndpointState(InboundEndpoint inboundEndpoint, JSONObject health) {
+        // health is the one copy the caller made for this endpoint, so status and health describe the same instant.
+        if (health != null && health.opt(Constants.STATUS) instanceof String) {
             // One of active, standby, connected, recovering, stopped or failed (design 7.12).
-            return (String) health.get(Constants.STATUS);
+            return (String) health.opt(Constants.STATUS);
         }
         if (inboundEndpoint.isDeactivated()) {
             return INACTIVE_STATUS;
@@ -273,7 +273,7 @@ public class InboundEndpointResource extends APIResource {
         return ACTIVE_STATUS;
     }
 
-    private Map<String, Object> getConsumerHealth(InboundEndpoint inboundEndpoint) {
+    private JSONObject getConsumerHealth(InboundEndpoint inboundEndpoint) {
         GenericEventBasedConsumer consumer = GenericEventBasedConsumerRegistry.get(inboundEndpoint.getName());
         GenericPollingConsumer pollingConsumer =
                 consumer == null ? GenericPollingConsumerRegistry.get(inboundEndpoint.getName()) : null;
@@ -281,9 +281,11 @@ public class InboundEndpointResource extends APIResource {
             return null;
         }
         try {
-            return consumer != null ? consumer.getHealth() : pollingConsumer.getHealth();
+            Map<String, Object> health = consumer != null ? consumer.getHealth() : pollingConsumer.getHealth();
+            return health == null ? null : Utils.copyHealth(health);
         } catch (Throwable t) {
-            // A consumer compiled against an older base class, or a failing provider, never breaks the API.
+            // A consumer compiled against an older base class, a failing provider, or a health map that can not
+            // be printed, never breaks the API.
             LOG.debug("Health not available for inbound endpoint " + inboundEndpoint.getName(), t);
             return null;
         }

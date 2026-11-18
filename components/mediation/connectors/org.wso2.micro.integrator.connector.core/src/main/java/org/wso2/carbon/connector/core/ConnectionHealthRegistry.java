@@ -42,7 +42,7 @@ public final class ConnectionHealthRegistry {
     public static void unregister(String connector, String connection, Supplier<Map<String, Object>> health) {
         Map<String, Supplier<Map<String, Object>>> connections = connectors.get(connector);
         if (connections != null) {
-            connections.remove(connection, health);
+            connections.computeIfPresent(connection, (name, current) -> current == health ? null : current);
         }
     }
 

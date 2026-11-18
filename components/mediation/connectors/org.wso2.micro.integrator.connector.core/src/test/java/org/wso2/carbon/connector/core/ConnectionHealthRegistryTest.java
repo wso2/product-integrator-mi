@@ -72,8 +72,10 @@ public class ConnectionHealthRegistryTest {
 
     @Test
     public void testUnregisterRemovesOnlyTheSameSupplier() {
-        Supplier<Map<String, Object>> older = Collections::emptyMap;
-        Supplier<Map<String, Object>> newer = Collections::emptyMap;
+        Supplier<Map<String, Object>> older = new EqualHealth();
+        Supplier<Map<String, Object>> newer = new EqualHealth();
+        Assert.assertNotSame(older, newer);
+        Assert.assertEquals("The two suppliers are equal, so only the identity tells them apart", older, newer);
         ConnectionHealthRegistry.register("identity", "c1", older);
         ConnectionHealthRegistry.register("identity", "c1", newer);
         ConnectionHealthRegistry.register("identity", "c2", older);
@@ -89,8 +91,45 @@ public class ConnectionHealthRegistryTest {
     }
 
     @Test
+    public void testUnregisterBeforeTheNewerSupplierKeepsIt() {
+        Supplier<Map<String, Object>> older = new EqualHealth();
+        Supplier<Map<String, Object>> newer = new EqualHealth();
+        ConnectionHealthRegistry.register("order", "c1", older);
+        ConnectionHealthRegistry.unregister("order", "c1", older);
+        Assert.assertTrue("The owner removes its own supplier",
+                ConnectionHealthRegistry.getConnections("order").isEmpty());
+
+        ConnectionHealthRegistry.register("order", "c1", newer);
+        ConnectionHealthRegistry.unregister("order", "c1", older);
+        Assert.assertSame("A second unregister of the older supplier does not remove the newer one", newer,
+                ConnectionHealthRegistry.getConnections("order").get("c1"));
+
+        ConnectionHealthRegistry.unregister("order", "c1", newer);
+        Assert.assertTrue(ConnectionHealthRegistry.getConnections("order").isEmpty());
+    }
+
+    @Test
     public void testUnregisterOfAnUnknownConnectorDoesNothing() {
         ConnectionHealthRegistry.unregister("unknown", "c1", Collections::emptyMap);
         Assert.assertTrue(ConnectionHealthRegistry.getConnections("unknown").isEmpty());
+    }
+
+    // Two objects of this class are equal. Only the identity tells them apart.
+    private static class EqualHealth implements Supplier<Map<String, Object>> {
+
+        @Override
+        public Map<String, Object> get() {
+            return Collections.emptyMap();
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof EqualHealth;
+        }
+
+        @Override
+        public int hashCode() {
+            return 1;
+        }
     }
 }

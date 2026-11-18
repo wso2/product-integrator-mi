@@ -40,20 +40,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class MetricUtilsTest {
 
     private Object savedConfigs;
+    private Object savedReporter;
 
     @Before
     public void setUp() throws Exception {
         Map<String, Object> configs = new HashMap<>();
         configs.put(MetricConstants.METRIC_HANDLER + ".metric_reporter", SlowReporter.class.getName());
         savedConfigs = setStatic(ConfigParser.class, "parsedConfigs", configs);
-        setStatic(MetricUtils.class, "metricReporter", null);
+        savedReporter = setStatic(MetricUtils.class, "metricReporter", null);
         SlowReporter.CREATED.set(0);
     }
 
     @After
     public void tearDown() throws Exception {
         setStatic(ConfigParser.class, "parsedConfigs", savedConfigs);
-        setStatic(MetricUtils.class, "metricReporter", null);
+        setStatic(MetricUtils.class, "metricReporter", savedReporter);
     }
 
     @Test
@@ -75,6 +76,8 @@ public class MetricUtilsTest {
             Assert.assertSame(reporter, MetricUtils.getMetricReporter());
         } finally {
             threads.shutdownNow();
+            Assert.assertTrue("No thread of the test runs after it",
+                    threads.awaitTermination(10, TimeUnit.SECONDS));
         }
     }
 

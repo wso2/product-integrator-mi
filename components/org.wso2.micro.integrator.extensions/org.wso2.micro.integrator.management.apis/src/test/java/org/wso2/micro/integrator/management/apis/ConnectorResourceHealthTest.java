@@ -27,8 +27,12 @@ import org.junit.Test;
 import org.wso2.carbon.connector.core.ConnectionHealthRegistry;
 
 import java.lang.reflect.Method;
+import java.util.AbstractMap;
+import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 public class ConnectorResourceHealthTest {
@@ -102,6 +106,69 @@ public class ConnectorResourceHealthTest {
         Assert.assertFalse(singleEntry().has("connections"));
     }
 
+    @Test
+    public void testHealthThatCanNotBePrintedGivesTheNameOnly() throws Exception {
+        Map<String, Object> notANumber = new HashMap<>();
+        notANumber.put("status", "active");
+        notANumber.put("rate", Double.NaN);
+        Map<String, Object> inner = new HashMap<>();
+        inner.put("rate", Double.POSITIVE_INFINITY);
+        Map<String, Object> nested = new HashMap<>();
+        nested.put("status", "active");
+        nested.put("pool", inner);
+        register("alpha", health("active", 5L));
+        register("beta", () -> notANumber);
+        register("delta", () -> nested);
+        register("gamma", ConnectorResourceHealthTest::failingHealth);
+        register("zeta", health("breaker_open", 2L));
+
+        for (JSONObject entry : new JSONObject[]{listEntry(), singleEntry()}) {
+            JSONArray connections = entry.getJSONArray("connections");
+            Assert.assertEquals("Every connection stays in the list", 5, connections.length());
+            Assert.assertEquals("alpha", connections.getJSONObject(0).getString("name"));
+            Assert.assertEquals("active", connections.getJSONObject(0).getString("status"));
+            Assert.assertEquals(5L, connections.getJSONObject(0).getJSONObject("health").getLong("filesDone"));
+            assertNameOnly(connections.getJSONObject(1), "beta");
+            assertNameOnly(connections.getJSONObject(2), "delta");
+            assertNameOnly(connections.getJSONObject(3), "gamma");
+            Assert.assertEquals("zeta", connections.getJSONObject(4).getString("name"));
+            Assert.assertEquals("breaker_open", connections.getJSONObject(4).getString("status"));
+            Assert.assertEquals(2L, connections.getJSONObject(4).getJSONObject("health").getLong("filesDone"));
+            Assert.assertNotNull("The entry can be printed", entry.toString(0));
+        }
+    }
+
+    @Test
+    public void testStatusAndHealthComeFromOneCopy() throws Exception {
+        register("c1", ConnectorResourceHealthTest::changingHealth);
+
+        for (JSONObject entry : new JSONObject[]{listEntry(), singleEntry()}) {
+            JSONObject connection = entry.getJSONArray("connections").getJSONObject(0);
+            Assert.assertEquals("The status and the health show the same state",
+                    connection.getJSONObject("health").getString("status"), connection.getString("status"));
+        }
+    }
+
+    @Test
+    public void testAChangeAfterTheCopyDoesNotReachTheEntry() throws Exception {
+        Map<String, Object> pool = new HashMap<>();
+        pool.put("open", 2L);
+        Map<String, Object> health = new HashMap<>();
+        health.put("status", "active");
+        health.put("pool", pool);
+        register("c1", () -> health);
+
+        JSONObject[] entries = {listEntry(), singleEntry()};
+        health.put("status", "failed");
+        pool.put("open", 0L);
+        for (JSONObject entry : entries) {
+            JSONObject connection = entry.getJSONArray("connections").getJSONObject(0);
+            Assert.assertEquals("active", connection.getString("status"));
+            Assert.assertEquals("active", connection.getJSONObject("health").getString("status"));
+            Assert.assertEquals(2L, connection.getJSONObject("health").getJSONObject("pool").getLong("open"));
+        }
+    }
+
     private void register(String connection, Supplier<Map<String, Object>> health) {
         registered.put(connection, health);
         ConnectionHealthRegistry.register(CONNECTOR, connection, health);
@@ -112,6 +179,29 @@ public class ConnectorResourceHealthTest {
         health.put("status", status);
         health.put("filesDone", filesDone);
         return () -> health;
+    }
+
+    // A health map of a provider that can not be read.
+    private static Map<String, Object> failingHealth() {
+        return new AbstractMap<String, Object>() {
+            @Override
+            public Set<Entry<String, Object>> entrySet() {
+                throw new ConcurrentModificationException("health changed");
+            }
+        };
+    }
+
+    // A health map of a provider that shows another status at each read.
+    private static Map<String, Object> changingHealth() {
+        return new AbstractMap<String, Object>() {
+            private int reads;
+
+            @Override
+            public Set<Entry<String, Object>> entrySet() {
+                reads++;
+                return Collections.<String, Object>singletonMap("status", "state" + reads).entrySet();
+            }
+        };
     }
 
     private static void assertNameOnly(JSONObject connection, String name) {

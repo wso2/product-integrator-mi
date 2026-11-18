@@ -37,7 +37,7 @@ public final class GenericPollingConsumerRegistry {
     }
 
     public static void unregister(String inboundEndpointName, GenericPollingConsumer consumer) {
-        consumers.remove(inboundEndpointName, consumer);
+        consumers.computeIfPresent(inboundEndpointName, (name, current) -> current == consumer ? null : current);
     }
 
     public static GenericPollingConsumer get(String inboundEndpointName) {

@@ -204,6 +204,20 @@ public class Utils {
         return !Objects.isNull(getStringPropertyFromMessageContext(messageContext, USERNAME_PROPERTY));
     }
 
+    /**
+     * Copies the health map of a provider and prints the copy once. A map that can not be read, copied or
+     * printed fails here, inside the catch of the caller. The caller takes the status and the health from this
+     * one copy, so a later change of the map of the provider does not reach the response.
+     *
+     * @param health the health map of a provider
+     * @return the copy
+     */
+    static JSONObject copyHealth(Map<String, Object> health) {
+        JSONObject copy = new JSONObject(health);
+        copy.toString(0);
+        return copy;
+    }
+
     public static void setJsonPayLoad(org.apache.axis2.context.MessageContext axis2MessageContext, Object jsonObject) {
 
         try {

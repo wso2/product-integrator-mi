@@ -85,8 +85,12 @@ public class PrometheusReporterV1 implements MetricReporter {
     }
 
     @Override
-    public void createMetrics(String serviceType, String type, String metricName, String metricHelp,
+    public synchronized void createMetrics(String serviceType, String type, String metricName, String metricHelp,
         String[] properties) {
+
+        if (isComponentMetric(lookupKey(serviceType, metricName))) {
+            return;
+        }
 
         if (!initialized) {
             initializeOnce();
@@ -174,8 +178,13 @@ public class PrometheusReporterV1 implements MetricReporter {
     }
 
     @Override
-    public void initErrorMetrics(String serviceType, String type, String metricName,
+    public synchronized void initErrorMetrics(String serviceType, String type, String metricName,
         String metricHelp, String[] properties) {
+
+        if (isComponentMetric(metricName)) {
+            return;
+        }
+
         if (serviceType.equals(SERVICE.API.name())) {
             ERROR_REQUESTS_RECEIVED_API = Counter.builder()
                 .name(MetricConstants.API_REQUEST_COUNT_ERROR_TOTAL).help(metricHelp)
@@ -305,32 +314,41 @@ public class PrometheusReporterV1 implements MetricReporter {
     @Override
     public synchronized boolean createComponentMetric(String type, String metricName, String metricHelp,
                                                       String[] labelNames) {
+        // The metric library keeps the array that it gets. So it gets a copy that no caller can change.
+        String[] labels = labelNames == null ? null : labelNames.clone();
+        List<Object> shape = Arrays.asList(metricName, type, labels == null ? null : Arrays.asList(labels));
         String registeredType = componentTypes.get(metricName);
         if (registeredType != null) {
             String[] registeredLabels = componentLabels.get(metricName);
-            if (registeredType.equals(type) && Arrays.equals(registeredLabels, labelNames)) {
+            if (registeredType.equals(type) && Arrays.equals(registeredLabels, labels)) {
                 return true;
             }
-            List<Object> shape = Arrays.asList(metricName, type,
-                    labelNames == null ? null : Arrays.asList(labelNames));
             if (refusedShapes.add(shape)) {
                 log.error("Metric " + metricName + " is registered as a " + registeredType + " with the labels "
                         + Arrays.toString(registeredLabels) + ". It is not registered again as a " + type
-                        + " with the labels " + Arrays.toString(labelNames) + ".");
+                        + " with the labels " + Arrays.toString(labels) + ".");
+            }
+            return false;
+        }
+        if (!MetricConstants.COUNTER.equals(type) && !MetricConstants.GAUGE.equals(type)) {
+            return false;
+        }
+        if (metricMap.containsKey(metricName)) {
+            if (refusedShapes.add(shape)) {
+                log.error("Metric " + metricName + " is in use by a metric of the server. It is not registered as a "
+                        + type + " with the labels " + Arrays.toString(labels) + ".");
             }
             return false;
         }
         Object metric;
         if (MetricConstants.COUNTER.equals(type)) {
-            metric = Counter.builder().name(metricName).help(metricHelp).labelNames(labelNames).register();
-        } else if (MetricConstants.GAUGE.equals(type)) {
-            metric = Gauge.builder().name(metricName).help(metricHelp).labelNames(labelNames).register();
+            metric = Counter.builder().name(metricName).help(metricHelp).labelNames(labels).register();
         } else {
-            return false;
+            metric = Gauge.builder().name(metricName).help(metricHelp).labelNames(labels).register();
         }
         metricMap.put(metricName, metric);
         componentTypes.put(metricName, type);
-        componentLabels.put(metricName, labelNames.clone());
+        componentLabels.put(metricName, labels);
         return true;
     }
 
@@ -340,7 +358,39 @@ public class PrometheusReporterV1 implements MetricReporter {
                 || labelValues.length != componentLabels.get(metricName).length) {
             return false;
         }
-        ((Gauge) metricMap.get(metricName)).labelValues(labelValues).set(value);
+        ((Gauge) metricMap.get(metricName)).labelValues(labelValues.clone()).set(value);
+        return true;
+    }
+
+    /**
+     * The key under which createMetrics keeps the metric of a service type.
+     */
+    private static String lookupKey(String serviceType, String metricName) {
+        for (SERVICE service : SERVICE.values()) {
+            if (serviceType.equalsIgnoreCase(service.name())) {
+                return metricName;
+            }
+        }
+        if (serviceType.equals(MetricConstants.SERVER)) {
+            return MetricConstants.SERVER_UP;
+        }
+        if (serviceType.equals(MetricConstants.VERSION)) {
+            return MetricConstants.SERVER_VERSION;
+        }
+        return MetricConstants.SERVICE_UP;
+    }
+
+    /**
+     * A key that a component registered stays with the metric of the component. The caller holds the lock of
+     * the reporter, so no component can register the key between this check and the registration.
+     */
+    private boolean isComponentMetric(String key) {
+        String registeredType = componentTypes.get(key);
+        if (registeredType == null) {
+            return false;
+        }
+        log.error("Metric " + key + " is registered as a " + registeredType + " of a component. It is not "
+                + "registered again as a metric of the server.");
         return true;
     }
 

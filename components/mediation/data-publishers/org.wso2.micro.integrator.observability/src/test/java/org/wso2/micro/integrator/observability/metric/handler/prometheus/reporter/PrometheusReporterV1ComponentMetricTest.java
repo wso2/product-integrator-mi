@@ -20,15 +20,29 @@ package org.wso2.micro.integrator.observability.metric.handler.prometheus.report
 
 import io.prometheus.metrics.core.metrics.Counter;
 import io.prometheus.metrics.core.metrics.Gauge;
+import io.prometheus.metrics.core.metrics.Histogram;
+import io.prometheus.metrics.model.registry.PrometheusRegistry;
+import io.prometheus.metrics.model.snapshots.GaugeSnapshot;
+import io.prometheus.metrics.model.snapshots.Label;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
+import org.wso2.config.mapper.ConfigParser;
 import org.wso2.micro.integrator.observability.util.MetricConstants;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
@@ -37,6 +51,21 @@ import java.util.logging.Logger;
 public class PrometheusReporterV1ComponentMetricTest {
 
     private static final String[] LABELS = {"kind", "name"};
+    private static final String[] SERVICE_LABELS = {MetricConstants.SERVICE_NAME, MetricConstants.SERVICE_TYPE};
+    private static final String[] API_LABELS =
+            {MetricConstants.SERVICE_NAME, MetricConstants.SERVICE_TYPE, MetricConstants.INVOCATION_URL};
+
+    private Object savedConfigs;
+
+    @Before
+    public void setUp() throws Exception {
+        savedConfigs = setStatic(ConfigParser.class, "parsedConfigs", new HashMap<String, Object>());
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        setStatic(ConfigParser.class, "parsedConfigs", savedConfigs);
+    }
 
     @Test
     public void testCounterIsRegisteredOnceAndUsedAgain() throws Exception {
@@ -143,10 +172,280 @@ public class PrometheusReporterV1ComponentMetricTest {
         Assert.assertTrue(metricMap(new PrometheusReporterV1()) instanceof ConcurrentHashMap);
     }
 
+    @Test
+    public void testLabelNamesAreCopied() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String name = "pd_v1_owned_names";
+        String[] names = {"owner"};
+
+        Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, name, "Owned names", names));
+        names[0] = "changed";
+
+        Assert.assertTrue("The registered shape stays the one of the registration",
+                reporter.createComponentMetric(MetricConstants.GAUGE, name, "Owned names", new String[]{"owner"}));
+        Assert.assertTrue(reporter.setGauge(name, new String[]{"first"}, 7));
+        Assert.assertEquals("The metric keeps the label name of the registration",
+                Collections.singletonList("owner"), labelNames(reporter, name));
+    }
+
+    @Test
+    public void testLabelValuesAreCopied() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String name = "pd_v1_owned_values";
+        Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, name, "Owned values",
+                new String[]{"owner"}));
+
+        String[] values = {"first"};
+        Assert.assertTrue(reporter.setGauge(name, values, 7));
+        values[0] = "second";
+        Assert.assertTrue(reporter.setGauge(name, values, 9));
+
+        Map<List<String>, Double> samples = samples(reporter, name);
+        Assert.assertEquals("Each call set its own series", 2, samples.size());
+        Assert.assertEquals(7.0, samples.get(Collections.singletonList("first")), 0.0);
+        Assert.assertEquals(9.0, samples.get(Collections.singletonList("second")), 0.0);
+    }
+
+    @Test
+    public void testRefusedShapeIsCopied() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String name = "pd_v1_owned_shape_total";
+        try (Errors errors = new Errors(name)) {
+            Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Owned shape", LABELS));
+            String[] other = {"other"};
+            Assert.assertFalse(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Owned shape", other));
+            other[0] = "changed";
+
+            Assert.assertFalse(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Owned shape",
+                    new String[]{"other"}));
+            Assert.assertEquals("The first refused shape is still known, so it gives no second ERROR", 1,
+                    errors.count());
+
+            Assert.assertFalse(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Owned shape", other));
+            Assert.assertEquals("The changed array is another refused shape", 2, errors.count());
+        }
+    }
+
+    @Test
+    public void testComponentMetricDoesNotTakeTheKeyOfAServerMetric() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String key = "pd_v1_timer_lookup";
+        try (Errors errors = new Errors(key)) {
+            reporter.createMetrics("PROXY", MetricConstants.HISTOGRAM, key, "Latency", SERVICE_LABELS);
+            Object histogram = metricMap(reporter).get(key);
+            Assert.assertTrue(histogram instanceof Histogram);
+
+            Assert.assertFalse("The key is in use by a metric of the server",
+                    reporter.createComponentMetric(MetricConstants.COUNTER, key, "Files", LABELS));
+            Assert.assertFalse(reporter.createComponentMetric(MetricConstants.COUNTER, key, "Files", LABELS));
+            Assert.assertEquals("The refused registration gives one ERROR", 1, errors.count());
+
+            Assert.assertSame("The metric of the server stays", histogram, metricMap(reporter).get(key));
+            Object timer = reporter.getTimer(key, new String[]{"proxy", "proxy-service"});
+            Assert.assertNotNull(timer);
+            reporter.observeTime(timer);
+            Assert.assertFalse("The refused metric is no gauge", reporter.setGauge(key, new String[]{"a", "b"}, 1));
+            assertNoCollector(key);
+        }
+    }
+
+    @Test
+    public void testServerMetricDoesNotTakeTheKeyOfAComponentMetric() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String key = "pd_v1_gauge_lookup";
+        try (Errors errors = new Errors(key)) {
+            Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, key, "Open sessions", LABELS));
+            Assert.assertTrue(reporter.setGauge(key, new String[]{"CONNECTION", "c1"}, 7));
+            Object gauge = metricMap(reporter).get(key);
+
+            reporter.createMetrics("API", MetricConstants.HISTOGRAM, key, "Latency", API_LABELS);
+            Assert.assertEquals("The refused registration gives an ERROR", 1, errors.count());
+            Assert.assertSame("The metric of the component stays", gauge, metricMap(reporter).get(key));
+            Assert.assertTrue("The same shape is used again",
+                    reporter.createComponentMetric(MetricConstants.GAUGE, key, "Open sessions", LABELS));
+            Assert.assertSame(gauge, metricMap(reporter).get(key));
+            Assert.assertTrue(reporter.setGauge(key, new String[]{"CONNECTION", "c1"}, 8));
+            Assert.assertEquals(8.0, samples(reporter, key).get(Arrays.asList("CONNECTION", "c1")), 0.0);
+        }
+
+        // The refused call registered nothing, so the metric of the server can still be registered.
+        String free = "pd_v1_api_timer_lookup";
+        reporter.createMetrics("API", MetricConstants.HISTOGRAM, free, "Latency", API_LABELS);
+        Object timer = reporter.getTimer(free, new String[]{"api", "api", "/context"});
+        Assert.assertNotNull(timer);
+        reporter.observeTime(timer);
+    }
+
+    @Test
+    public void testErrorMetricAndComponentMetricKeepTheirKeys() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String key = "pd_v1_component_first_total";
+        try (Errors errors = new Errors(key)) {
+            Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, key, "Files", LABELS));
+            Object counter = metricMap(reporter).get(key);
+
+            reporter.initErrorMetrics("PROXY", MetricConstants.COUNTER, key, "Errors", SERVICE_LABELS);
+            Assert.assertEquals("The refused registration gives an ERROR", 1, errors.count());
+            Assert.assertSame("The metric of the component stays", counter, metricMap(reporter).get(key));
+            reporter.incrementCount(key, new String[]{"INBOUND", "a"});
+            Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, key, "Files", LABELS));
+        }
+
+        // The refused call registered nothing, so the error metric of the server can still be registered.
+        String serverKey = "pd_v1_error_lookup";
+        try (Errors errors = new Errors(serverKey)) {
+            reporter.initErrorMetrics("PROXY", MetricConstants.COUNTER, serverKey, "Errors", SERVICE_LABELS);
+            Object errorCounter = metricMap(reporter).get(serverKey);
+            Assert.assertTrue(errorCounter instanceof Counter);
+
+            Assert.assertFalse("The key is in use by a metric of the server",
+                    reporter.createComponentMetric(MetricConstants.GAUGE, serverKey, "Open sessions", LABELS));
+            Assert.assertEquals(1, errors.count());
+            Assert.assertSame("The metric of the server stays", errorCounter, metricMap(reporter).get(serverKey));
+            reporter.incrementCount(serverKey, new String[]{"proxy", "proxy-service"});
+            assertNoCollector(serverKey);
+        }
+    }
+
+    @Test
+    public void testComponentRegistrationWaitsForAServerRegistration() throws Exception {
+        PrometheusReporterV1 reporter = new PrometheusReporterV1();
+        String key = "pd_v1_held_lookup";
+        HeldConfigs configs = new HeldConfigs();
+        setStatic(ConfigParser.class, "parsedConfigs", configs);
+        AtomicReference<Boolean> registered = new AtomicReference<>();
+        // The server registration checked the key and holds before it registers its metric.
+        Thread server = new Thread(() -> reporter.createMetrics("INBOUND_ENDPOINT", MetricConstants.HISTOGRAM, key,
+                "Latency", SERVICE_LABELS));
+        Thread component = new Thread(() -> registered.set(
+                reporter.createComponentMetric(MetricConstants.COUNTER, key, "Files", LABELS)));
+        try (Errors errors = new Errors(key)) {
+            server.start();
+            Assert.assertTrue("The server registration reads the configs", configs.entered.await(10, TimeUnit.SECONDS));
+            Assert.assertFalse(metricMap(reporter).containsKey(key));
+
+            component.start();
+            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (component.getState() != Thread.State.BLOCKED && System.nanoTime() < end) {
+                Thread.sleep(10);
+            }
+            Assert.assertEquals("The component registration waits for the lock of the reporter", Thread.State.BLOCKED,
+                    component.getState());
+            Assert.assertFalse("Nothing is registered under the key yet", metricMap(reporter).containsKey(key));
+            Assert.assertNull(registered.get());
+
+            configs.release.countDown();
+            server.join(10000);
+            component.join(10000);
+            Assert.assertFalse(server.isAlive() || component.isAlive());
+
+            Assert.assertEquals("The key stays with the metric of the server", Boolean.FALSE, registered.get());
+            Assert.assertTrue(metricMap(reporter).get(key) instanceof Histogram);
+            Object timer = reporter.getTimer(key, new String[]{"inbound", "inbound-endpoint"});
+            Assert.assertNotNull(timer);
+            reporter.observeTime(timer);
+            Assert.assertEquals(1, errors.count());
+            assertNoCollector(key);
+        } finally {
+            configs.release.countDown();
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> metricMap(PrometheusReporterV1 reporter) throws Exception {
         Field field = PrometheusReporterV1.class.getDeclaredField("metricMap");
         field.setAccessible(true);
         return (Map<String, Object>) field.get(reporter);
+    }
+
+    private static List<String> labelNames(PrometheusReporterV1 reporter, String name) throws Exception {
+        List<String> names = new ArrayList<>();
+        Gauge gauge = (Gauge) metricMap(reporter).get(name);
+        for (Label label : gauge.collect().getDataPoints().get(0).getLabels()) {
+            names.add(label.getName());
+        }
+        return names;
+    }
+
+    // The value of each series of a metric, by its label values. A series that is collected twice fails.
+    private static Map<List<String>, Double> samples(PrometheusReporterV1 reporter, String name) throws Exception {
+        Map<List<String>, Double> samples = new HashMap<>();
+        Gauge gauge = (Gauge) metricMap(reporter).get(name);
+        for (GaugeSnapshot.GaugeDataPointSnapshot point : gauge.collect().getDataPoints()) {
+            List<String> values = new ArrayList<>();
+            for (Label label : point.getLabels()) {
+                values.add(label.getValue());
+            }
+            Assert.assertNull("Each series is collected once", samples.put(values, point.getValue()));
+        }
+        return samples;
+    }
+
+    // The metric library takes a name once. So a name that it takes here has no metric.
+    private static void assertNoCollector(String name) {
+        PrometheusRegistry.defaultRegistry.unregister(Gauge.builder().name(name).help("Probe").register());
+    }
+
+    private static Object setStatic(Class<?> type, String name, Object value) throws Exception {
+        Field field = type.getDeclaredField(name);
+        field.setAccessible(true);
+        Object previous = field.get(null);
+        field.set(null, value);
+        return previous;
+    }
+
+    /**
+     * Counts the ERROR lines of the reporter that name one metric.
+     */
+    private static class Errors extends Handler implements AutoCloseable {
+
+        private final String name;
+        private final AtomicInteger count = new AtomicInteger();
+
+        Errors(String name) {
+            this.name = name;
+            Logger.getLogger(PrometheusReporterV1.class.getName()).addHandler(this);
+        }
+
+        int count() {
+            return count.get();
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            if (record.getLevel() == Level.SEVERE && record.getMessage().contains(name)) {
+                count.incrementAndGet();
+            }
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+            Logger.getLogger(PrometheusReporterV1.class.getName()).removeHandler(this);
+        }
+    }
+
+    /**
+     * The parsed configs of the server. The first read waits until the test lets it go. A registration of a
+     * metric of the server reads the configs after it checked its key and before it registers the metric.
+     */
+    private static class HeldConfigs extends HashMap<String, Object> {
+
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        @Override
+        public Object get(Object key) {
+            entered.countDown();
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return super.get(key);
+        }
     }
 }

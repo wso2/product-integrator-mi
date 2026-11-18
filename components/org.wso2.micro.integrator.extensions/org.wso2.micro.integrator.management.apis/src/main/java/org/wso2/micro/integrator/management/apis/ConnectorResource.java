@@ -231,28 +231,31 @@ public class ConnectorResource implements MiApiResource {
         for (Map.Entry<String, Supplier<Map<String, Object>>> entry : healthByName.entrySet()) {
             JSONObject connection = new JSONObject();
             connection.put(NAME_ATTRIBUTE, entry.getKey());
-            Map<String, Object> health = getConnectionHealth(connector, entry.getKey(), entry.getValue());
+            JSONObject health = getConnectionHealth(connector, entry.getKey(), entry.getValue());
             if (health != null) {
-                if (health.get(STATUS_ATTRIBUTE) instanceof String) {
-                    connection.put(STATUS_ATTRIBUTE, health.get(STATUS_ATTRIBUTE));
+                // The status and the health come from the one copy, so both show the same state.
+                Object status = health.opt(STATUS_ATTRIBUTE);
+                if (status instanceof String) {
+                    connection.put(STATUS_ATTRIBUTE, status);
                 }
-                connection.put(HEALTH_ATTRIBUTE, new JSONObject(health));
+                connection.put(HEALTH_ATTRIBUTE, health);
             }
             connections.put(connection);
         }
         connectorObject.put(CONNECTIONS_ATTRIBUTE, connections);
     }
 
-    private Map<String, Object> getConnectionHealth(String connector, String connection,
-                                                    Supplier<Map<String, Object>> supplier) {
+    private JSONObject getConnectionHealth(String connector, String connection,
+                                           Supplier<Map<String, Object>> supplier) {
         try {
             Map<String, Object> health = supplier.get();
             if (health == null) {
                 LOG.debug("No health for the connection " + connection + " of the connector " + connector);
+                return null;
             }
-            return health;
+            return Utils.copyHealth(health);
         } catch (Throwable t) {
-            // A failing health call of a connector never breaks the API.
+            // A failing health call of a connector, or a health map that can not be printed, never breaks the API.
             LOG.debug("Health not available for the connection " + connection + " of the connector " + connector,
                     t);
             return null;

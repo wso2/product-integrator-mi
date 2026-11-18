@@ -30,9 +30,13 @@ import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericPollingConsumer;
 import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericPollingConsumerRegistry;
 
 import java.lang.reflect.Method;
+import java.util.AbstractMap;
+import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.Supplier;
 
 public class InboundEndpointResourceHealthTest {
@@ -57,7 +61,9 @@ public class InboundEndpointResourceHealthTest {
                 inbound.getString(Constants.STATUS));
         Assert.assertEquals("The whole health map is printed", 3L,
                 inbound.getJSONObject("health").getLong("filesDone"));
-        Assert.assertSame(health, consumerHealth(inboundEndpoint()));
+        Assert.assertEquals("The status and the health show the same state", "degraded",
+                inbound.getJSONObject("health").getString(Constants.STATUS));
+        Assert.assertEquals("The status of the list comes from the same health", "degraded", listStatus());
     }
 
     @Test
@@ -69,7 +75,7 @@ public class InboundEndpointResourceHealthTest {
         GenericEventBasedConsumerRegistry.register(NAME, new HealthEventBasedConsumer(eventHealth));
         GenericPollingConsumerRegistry.register(NAME, new HealthPollingConsumer(() -> pollingHealth));
 
-        Assert.assertSame(eventHealth, consumerHealth(inboundEndpoint()));
+        Assert.assertEquals("connected", consumerHealth(inboundEndpoint()).getString(Constants.STATUS));
         Assert.assertEquals("connected", convert(inboundEndpoint()).getString(Constants.STATUS));
     }
 
@@ -105,6 +111,93 @@ public class InboundEndpointResourceHealthTest {
         Assert.assertFalse(inbound.has("health"));
     }
 
+    @Test
+    public void testPollingHealthThatCanNotBePrintedGivesNoHealth() throws Exception {
+        Map<String, Object> health = new HashMap<>();
+        health.put(Constants.STATUS, "failed");
+        health.put("rate", Double.POSITIVE_INFINITY);
+        GenericPollingConsumerRegistry.register(NAME, new HealthPollingConsumer(() -> health));
+
+        assertFallback();
+    }
+
+    @Test
+    public void testPollingHealthThatCanNotBeReadGivesNoHealth() throws Exception {
+        GenericPollingConsumerRegistry.register(NAME,
+                new HealthPollingConsumer(InboundEndpointResourceHealthTest::failingHealth));
+
+        assertFallback();
+    }
+
+    @Test
+    public void testEventBasedHealthThatCanNotBePrintedGivesNoHealth() throws Exception {
+        Map<String, Object> eventHealth = new HashMap<>();
+        eventHealth.put(Constants.STATUS, "connected");
+        eventHealth.put("rate", Double.NaN);
+        Map<String, Object> pollingHealth = new HashMap<>();
+        pollingHealth.put(Constants.STATUS, "degraded");
+        GenericEventBasedConsumerRegistry.register(NAME, new HealthEventBasedConsumer(eventHealth));
+        GenericPollingConsumerRegistry.register(NAME, new HealthPollingConsumer(() -> pollingHealth));
+
+        // The event based consumer is still the one that is asked. The polling one does not take its place.
+        assertFallback();
+    }
+
+    @Test
+    public void testStatusAndHealthOfAPollingConsumerComeFromOneCopy() throws Exception {
+        GenericPollingConsumerRegistry.register(NAME,
+                new HealthPollingConsumer(InboundEndpointResourceHealthTest::changingHealth));
+
+        JSONObject inbound = convert(inboundEndpoint());
+        Assert.assertEquals("The status and the health show the same state",
+                inbound.getJSONObject("health").getString(Constants.STATUS), inbound.getString(Constants.STATUS));
+    }
+
+    @Test
+    public void testAChangeAfterTheCopyDoesNotReachTheResponse() throws Exception {
+        Map<String, Object> health = new HashMap<>();
+        health.put(Constants.STATUS, "active");
+        GenericPollingConsumerRegistry.register(NAME, new HealthPollingConsumer(() -> health));
+
+        JSONObject inbound = convert(inboundEndpoint());
+        health.put(Constants.STATUS, "failed");
+        Assert.assertEquals("active", inbound.getString(Constants.STATUS));
+        Assert.assertEquals("active", inbound.getJSONObject("health").getString(Constants.STATUS));
+    }
+
+    // With no health the single view and the list show the status of the endpoint and no health.
+    private static void assertFallback() throws Exception {
+        JSONObject inbound = convert(inboundEndpoint());
+        Assert.assertNull(consumerHealth(inboundEndpoint()));
+        Assert.assertEquals(fallbackStatus(), inbound.getString(Constants.STATUS));
+        Assert.assertFalse(inbound.has("health"));
+        Assert.assertEquals(fallbackStatus(), listStatus());
+        Assert.assertNotNull("The response can be printed", inbound.toString(0));
+    }
+
+    // A health map of a provider that can not be read.
+    private static Map<String, Object> failingHealth() {
+        return new AbstractMap<String, Object>() {
+            @Override
+            public Set<Entry<String, Object>> entrySet() {
+                throw new ConcurrentModificationException("health changed");
+            }
+        };
+    }
+
+    // A health map of a provider that shows another status at each read.
+    private static Map<String, Object> changingHealth() {
+        return new AbstractMap<String, Object>() {
+            private int reads;
+
+            @Override
+            public Set<Entry<String, Object>> entrySet() {
+                reads++;
+                return Collections.<String, Object>singletonMap("status", "state" + reads).entrySet();
+            }
+        };
+    }
+
     private static InboundEndpoint inboundEndpoint() {
         InboundEndpoint inboundEndpoint = new InboundEndpoint();
         inboundEndpoint.setName(NAME);
@@ -125,12 +218,20 @@ public class InboundEndpointResourceHealthTest {
         return (JSONObject) conversion.invoke(new InboundEndpointResource("/inbound-endpoints"), inboundEndpoint);
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> consumerHealth(InboundEndpoint inboundEndpoint) throws Exception {
+    private static JSONObject consumerHealth(InboundEndpoint inboundEndpoint) throws Exception {
         Method lookup = InboundEndpointResource.class.getDeclaredMethod("getConsumerHealth", InboundEndpoint.class);
         lookup.setAccessible(true);
-        return (Map<String, Object>) lookup.invoke(new InboundEndpointResource("/inbound-endpoints"),
-                inboundEndpoint);
+        return (JSONObject) lookup.invoke(new InboundEndpointResource("/inbound-endpoints"), inboundEndpoint);
+    }
+
+    // The status of the entry of the list, taken as the list takes it.
+    private static String listStatus() throws Exception {
+        Method state = InboundEndpointResource.class.getDeclaredMethod("getInboundEndpointState",
+                InboundEndpoint.class, JSONObject.class);
+        state.setAccessible(true);
+        InboundEndpoint inboundEndpoint = inboundEndpoint();
+        return (String) state.invoke(new InboundEndpointResource("/inbound-endpoints"), inboundEndpoint,
+                consumerHealth(inboundEndpoint));
     }
 
     private static class HealthPollingConsumer extends GenericPollingConsumer {

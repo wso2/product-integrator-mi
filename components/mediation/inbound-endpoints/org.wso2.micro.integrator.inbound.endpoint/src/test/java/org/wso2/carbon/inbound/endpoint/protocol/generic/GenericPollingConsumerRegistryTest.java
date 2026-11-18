@@ -50,6 +50,8 @@ public class GenericPollingConsumerRegistryTest {
     public void testUnregisterRemovesOnlyTheSameObject() {
         GenericPollingConsumer older = newConsumer();
         GenericPollingConsumer newer = newConsumer();
+        Assert.assertNotSame(older, newer);
+        Assert.assertEquals("The two consumers are equal, so only the identity tells them apart", older, newer);
         GenericPollingConsumerRegistry.register(NAME, older);
         GenericPollingConsumerRegistry.register(NAME, newer);
 
@@ -59,6 +61,20 @@ public class GenericPollingConsumerRegistryTest {
 
         GenericPollingConsumerRegistry.unregister(NAME, newer);
         Assert.assertNull(GenericPollingConsumerRegistry.get(NAME));
+    }
+
+    @Test
+    public void testUnregisterBeforeTheNewerConsumerKeepsIt() {
+        GenericPollingConsumer older = newConsumer();
+        GenericPollingConsumer newer = newConsumer();
+        GenericPollingConsumerRegistry.register(NAME, older);
+        GenericPollingConsumerRegistry.unregister(NAME, older);
+        Assert.assertNull("The owner removes its own consumer", GenericPollingConsumerRegistry.get(NAME));
+
+        GenericPollingConsumerRegistry.register(NAME, newer);
+        GenericPollingConsumerRegistry.unregister(NAME, older);
+        Assert.assertSame("A second unregister of the older consumer does not remove the newer one", newer,
+                GenericPollingConsumerRegistry.get(NAME));
     }
 
     @Test
@@ -79,9 +95,13 @@ public class GenericPollingConsumerRegistryTest {
     public void testDestroyOfAnOlderProcessorKeepsTheNewerConsumer() {
         GenericProcessor older = newProcessor();
         older.init();
+        GenericPollingConsumer olderConsumer = GenericPollingConsumerRegistry.get(NAME);
         GenericProcessor newer = newProcessor();
         newer.init();
         GenericPollingConsumer newerConsumer = GenericPollingConsumerRegistry.get(NAME);
+        Assert.assertNotNull("The second processor registers a consumer", newerConsumer);
+        Assert.assertNotSame("The second processor registers its own consumer", olderConsumer, newerConsumer);
+        Assert.assertEquals(olderConsumer, newerConsumer);
 
         older.destroy();
         Assert.assertSame("The destroy of the older processor keeps the newer consumer", newerConsumer,
@@ -127,6 +147,17 @@ public class GenericPollingConsumerRegistryTest {
         @Override
         public void destroy() {
             destroyed = true;
+        }
+
+        // Two consumers of this class are equal. Only the identity tells them apart.
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof TestPollingConsumer;
+        }
+
+        @Override
+        public int hashCode() {
+            return 1;
         }
     }
 }
