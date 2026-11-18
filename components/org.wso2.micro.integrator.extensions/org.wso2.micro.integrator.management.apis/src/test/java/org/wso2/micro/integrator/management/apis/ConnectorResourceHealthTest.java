@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 public class ConnectorResourceHealthTest {
@@ -166,6 +167,24 @@ public class ConnectorResourceHealthTest {
             JSONObject connection = entry.getJSONArray("connections").getJSONObject(0);
             Assert.assertEquals("The status and the health show the same state",
                     connection.getJSONObject("health").getString("status"), connection.getString("status"));
+        }
+    }
+
+    @Test
+    public void testAtomicCountersKeepTheirNumericValue() throws Exception {
+        long count = 9007199254740993L;
+        AtomicLong files = new AtomicLong(count);
+        AtomicInteger pending = new AtomicInteger(3);
+        register("c1", () -> Map.of("files", files, "pending", List.of(pending)));
+        JSONObject[] entries = {listEntry(), singleEntry()};
+        files.incrementAndGet();
+        pending.set(0);
+        for (JSONObject entry : entries) {
+            JSONObject health = entry.getJSONArray("connections").getJSONObject(0).getJSONObject("health");
+            Assert.assertTrue(health.get("files") instanceof Number);
+            Assert.assertEquals(count, health.getLong("files"));
+            Assert.assertTrue(health.getJSONArray("pending").get(0) instanceof Number);
+            Assert.assertEquals(3, health.getJSONArray("pending").getInt(0));
         }
     }
 

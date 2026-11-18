@@ -61,8 +61,8 @@ public class MetricFormatter {
 
         while (metricsList.hasMoreElements()) {
             MetricFamilySamples metricFamilySamples = metricsList.nextElement();
-            metric.append("# HELP ").append(metricFamilySamples.name).append(' ').append(metricFamilySamples.help).
-                    append("\n").append("# TYPE ").
+            metric.append("# HELP ").append(metricFamilySamples.name).append(' ')
+                    .append(escapeText(metricFamilySamples.help)).append("\n").append("# TYPE ").
                     append(metricFamilySamples.name).append(' ').append(typeString(metricFamilySamples.type)).
                     append("\n");
 
@@ -73,8 +73,8 @@ public class MetricFormatter {
                     labelNames.append("{");
 
                     for (int i = 0; i < sample.labelNames.size(); ++i) {
-                        labelNames.append(sample.labelNames.get(i)).append("=\"").append(sample.labelValues.get(i)).
-                                append("\"");
+                        labelNames.append(sample.labelNames.get(i)).append("=\"")
+                                .append(escapeText(sample.labelValues.get(i)).replace("\"", "\\\"")).append('"');
                         if (i < sample.labelNames.size() - 1) {
                             labelNames.append(", ");
                         } else {
@@ -93,5 +93,9 @@ public class MetricFormatter {
         }
         metricsValue.append(metric);
         return metricsValue.toString();
+    }
+
+    private static String escapeText(String text) {
+        return String.valueOf(text).replace("\\", "\\\\").replace("\n", "\\n");
     }
 }

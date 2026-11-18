@@ -57,6 +57,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -241,7 +242,12 @@ public class Utils {
             }
             return array;
         }
-        return JSONObject.wrap(value);
+        Object wrapped = JSONObject.wrap(value);
+        if (value instanceof Number && !(wrapped instanceof Number)) {
+            // JSON wraps atomic counters as strings. Keep the sampled value and its precision.
+            return new BigDecimal(wrapped instanceof String text ? text : value.toString());
+        }
+        return wrapped;
     }
 
     private static void checkHealthDepth(int depth) {

@@ -38,14 +38,22 @@ public final class ConnectionHealthRegistry {
     }
 
     public static void register(String connector, String connection, Supplier<Map<String, Object>> health) {
-        connectors.computeIfAbsent(connector, name -> new ConcurrentHashMap<>()).put(connection, health);
+        connectors.compute(connector, (name, connections) -> {
+            if (connections == null) {
+                connections = new ConcurrentHashMap<>();
+            }
+            connections.put(connection, health);
+            return connections;
+        });
     }
 
     public static void unregister(String connector, String connection, Supplier<Map<String, Object>> health) {
-        Map<String, Supplier<Map<String, Object>>> connections = connectors.get(connector);
-        if (connections != null) {
-            connections.computeIfPresent(connection, (name, current) -> current == health ? null : current);
-        }
+        connectors.computeIfPresent(connector, (name, connections) -> {
+            if (connections.get(connection) == health) {
+                connections.remove(connection);
+            }
+            return connections.isEmpty() ? null : connections;
+        });
     }
 
     /**

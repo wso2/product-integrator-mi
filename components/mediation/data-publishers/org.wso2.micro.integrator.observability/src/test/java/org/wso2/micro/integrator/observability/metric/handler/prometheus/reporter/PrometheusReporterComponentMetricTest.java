@@ -28,6 +28,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.wso2.config.mapper.ConfigParser;
+import org.wso2.micro.integrator.observability.metric.publisher.MetricFormatter;
 import org.wso2.micro.integrator.observability.util.MetricConstants;
 
 import java.lang.reflect.Field;
@@ -141,6 +142,44 @@ public class PrometheusReporterComponentMetricTest {
         } finally {
             logger.removeHandler(handler);
         }
+    }
+
+    @Test
+    public void testDuplicateLabelsDoNotPublishACounterOrGauge() {
+        String healthy = "component_healthy";
+        Assert.assertTrue(reporter.createComponentMetric("Gauge", healthy, "Active", new String[0]));
+        Assert.assertTrue(reporter.setGauge(healthy, new String[0], 7));
+
+        for (String type : new String[]{"Counter", "Gauge"}) {
+            String name = "component_" + type;
+            try {
+                reporter.createComponentMetric(type, name, "Operations", new String[]{"file_id", "file_id"});
+                Assert.fail("Duplicate label names must fail before registration");
+            } catch (IllegalArgumentException expected) {
+                Assert.assertTrue(reporter.createComponentMetric(type, name, "Operations", new String[]{"file_id"}));
+            }
+            if ("Gauge".equals(type)) {
+                Assert.assertTrue(reporter.setGauge(name, new String[]{"one"}, 1));
+            } else {
+                reporter.incrementCount(name, new String[]{"one"});
+            }
+        }
+        String text = MetricFormatter.formatMetrics(CollectorRegistry.defaultRegistry.metricFamilySamples());
+        Assert.assertTrue(text.contains("component_healthy 7.0\n"));
+        Assert.assertTrue(text.contains("component_Gauge{file_id=\"one\"} 1.0\n"));
+        Assert.assertTrue(text.contains("component_Counter{file_id=\"one\"} 1.0\n"));
+    }
+
+    @Test
+    public void testHelpAndLabelsInLegacyScrape() {
+        String name = "component_state";
+        String help = "Path \\ and \"quote\"\nnext";
+        Assert.assertTrue(reporter.createComponentMetric("Gauge", name, help, new String[]{"connection", "kind"}));
+        Assert.assertTrue(reporter.setGauge(name, new String[]{"a\\b\"c\nd", "file"}, 2));
+        String text = MetricFormatter.formatMetrics(CollectorRegistry.defaultRegistry.metricFamilySamples());
+        Assert.assertTrue(text.contains("# HELP component_state Path \\\\ and \"quote\"\\nnext\n"
+                + "# TYPE component_state gauge\n"));
+        Assert.assertTrue(text.contains("component_state{connection=\"a\\\\b\\\"c\\nd\", kind=\"file\"} 2.0\n"));
     }
 
     @Test

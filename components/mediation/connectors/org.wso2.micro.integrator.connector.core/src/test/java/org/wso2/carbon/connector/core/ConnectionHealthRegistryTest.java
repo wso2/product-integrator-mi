@@ -20,6 +20,7 @@ package org.wso2.carbon.connector.core;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -106,6 +107,29 @@ public class ConnectionHealthRegistryTest {
 
         ConnectionHealthRegistry.unregister("order", "c1", newer);
         Assert.assertTrue(ConnectionHealthRegistry.getConnections("order").isEmpty());
+    }
+
+    @Test
+    public void testLastConnectionReleasesItsLibrary() throws Exception {
+        String library = "retiredLibrary";
+        Supplier<Map<String, Object>> first = new EqualHealth();
+        Supplier<Map<String, Object>> second = new EqualHealth();
+        Field field = ConnectionHealthRegistry.class.getDeclaredField("connectors");
+        field.setAccessible(true);
+        Map<?, ?> libraries = (Map<?, ?>) field.get(null);
+        ConnectionHealthRegistry.register(library, "first", first);
+        Map<String, Supplier<Map<String, Object>>> snapshot = ConnectionHealthRegistry.getConnections(library);
+        try {
+            ConnectionHealthRegistry.register(library, "second", second);
+            ConnectionHealthRegistry.unregister(library, "first", first);
+            Assert.assertSame(second, ConnectionHealthRegistry.getConnections(library).get("second"));
+            ConnectionHealthRegistry.unregister(library, "second", second);
+            Assert.assertFalse("An empty library must be removed", libraries.containsKey(library));
+            Assert.assertEquals(Collections.singletonMap("first", first), snapshot);
+        } finally {
+            ConnectionHealthRegistry.unregister(library, "first", first);
+            ConnectionHealthRegistry.unregister(library, "second", second);
+        }
     }
 
     @Test

@@ -309,6 +309,12 @@ public class PrometheusReporter implements MetricReporter {
             }
             return false;
         }
+        Set<String> names = new HashSet<>();
+        for (String label : labels) {
+            if (!names.add(label)) {
+                throw new IllegalArgumentException("Duplicate metric label name: " + label);
+            }
+        }
         Object metric;
         if (MetricConstants.COUNTER.equals(type)) {
             metric = Counter.build().name(metricName).help(metricHelp).labelNames(labels).register();
