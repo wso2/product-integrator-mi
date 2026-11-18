@@ -31,8 +31,11 @@ import org.wso2.micro.integrator.observability.util.MetricConstants;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Class for instrumenting Prometheus Metrics.
@@ -63,7 +66,10 @@ public class PrometheusReporter implements MetricReporter {
     private double[] inboundEndpointLatencyBuckets;
     private double[] dataServiceLatencyBuckets;
 
-    private Map<String, Object> metricMap = new HashMap();
+    private Map<String, Object> metricMap = new ConcurrentHashMap<>();
+    private final Map<String, String> componentTypes = new HashMap<>();
+    private final Map<String, String[]> componentLabels = new HashMap<>();
+    private final Set<List<Object>> refusedShapes = new HashSet<>();
 
     @Override
     public void initMetrics() {
@@ -264,6 +270,48 @@ public class PrometheusReporter implements MetricReporter {
     public void serviceDown(String serviceName, String serviceType) {
         Gauge gauge = (Gauge) metricMap.get(MetricConstants.SERVICE_UP);
         gauge.labels(serviceName, serviceType).set(0);
+    }
+
+    @Override
+    public synchronized boolean createComponentMetric(String type, String metricName, String metricHelp,
+                                                      String[] labelNames) {
+        String registeredType = componentTypes.get(metricName);
+        if (registeredType != null) {
+            String[] registeredLabels = componentLabels.get(metricName);
+            if (registeredType.equals(type) && Arrays.equals(registeredLabels, labelNames)) {
+                return true;
+            }
+            List<Object> shape = Arrays.asList(metricName, type,
+                    labelNames == null ? null : Arrays.asList(labelNames));
+            if (refusedShapes.add(shape)) {
+                log.error("Metric " + metricName + " is registered as a " + registeredType + " with the labels "
+                        + Arrays.toString(registeredLabels) + ". It is not registered again as a " + type
+                        + " with the labels " + Arrays.toString(labelNames) + ".");
+            }
+            return false;
+        }
+        Object metric;
+        if (MetricConstants.COUNTER.equals(type)) {
+            metric = Counter.build().name(metricName).help(metricHelp).labelNames(labelNames).register();
+        } else if (MetricConstants.GAUGE.equals(type)) {
+            metric = Gauge.build().name(metricName).help(metricHelp).labelNames(labelNames).register();
+        } else {
+            return false;
+        }
+        metricMap.put(metricName, metric);
+        componentTypes.put(metricName, type);
+        componentLabels.put(metricName, labelNames.clone());
+        return true;
+    }
+
+    @Override
+    public synchronized boolean setGauge(String metricName, String[] labelValues, double value) {
+        if (!MetricConstants.GAUGE.equals(componentTypes.get(metricName)) || labelValues == null
+                || labelValues.length != componentLabels.get(metricName).length) {
+            return false;
+        }
+        ((Gauge) metricMap.get(metricName)).labels(labelValues).set(value);
+        return true;
     }
 
     enum SERVICE {

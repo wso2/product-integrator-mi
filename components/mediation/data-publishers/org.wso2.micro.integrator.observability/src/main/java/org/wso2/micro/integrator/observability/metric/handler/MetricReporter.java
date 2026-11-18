@@ -142,4 +142,30 @@ public interface MetricReporter {
      * @param serviceType Service Type
      */
     void serviceDown(String serviceName, String serviceType);
+
+    /**
+     * Registers a counter or a gauge of a component under the metric name itself. A name that is registered
+     * with the same type and the same label names is used again.
+     *
+     * @param type       The type of metric, a counter or a gauge
+     * @param metricName Metric name
+     * @param metricHelp Metric description
+     * @param labelNames Metric label names
+     * @return true when the metric is registered or used again, false when it is not supported
+     */
+    default boolean createComponentMetric(String type, String metricName, String metricHelp, String[] labelNames) {
+        return false;
+    }
+
+    /**
+     * Sets a gauge that createComponentMetric registered.
+     *
+     * @param metricName  Metric name
+     * @param labelValues Metric label values
+     * @param value       The value of the gauge
+     * @return true when the gauge is set, false when it is not supported
+     */
+    default boolean setGauge(String metricName, String[] labelValues, double value) {
+        return false;
+    }
 }

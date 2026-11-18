@@ -33,6 +33,7 @@ import org.apache.synapse.libraries.model.SynapseLibrary;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.wso2.carbon.connector.core.ConnectionHealthRegistry;
 import org.wso2.micro.core.util.AuditLogger;
 import org.wso2.micro.integrator.initializer.ServiceBusUtils;
 import org.wso2.micro.integrator.initializer.persistence.MediationPersistenceManager;
@@ -48,6 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.wso2.micro.integrator.management.apis.Constants.ITEM_TYPE_IMPORT;
@@ -70,6 +73,8 @@ public class ConnectorResource implements MiApiResource {
     private static final String DESCRIPTION_ATTRIBUTE = "description";
     private static final String CONNECTOR_NAME = "connectorName";
     private static final String PACKAGE_NAME = "packageName";
+    private static final String CONNECTIONS_ATTRIBUTE = "connections";
+    private static final String HEALTH_ATTRIBUTE = "health";
 
     public ConnectorResource() {
 
@@ -176,6 +181,7 @@ public class ConnectorResource implements MiApiResource {
         connectorObject.put(PACKAGE_ATTRIBUTE, connector.getPackage());
         connectorObject.put(DESCRIPTION_ATTRIBUTE, connector.getDescription());
         connectorObject.put(STATUS_ATTRIBUTE, getConnectorState(connector.getLibStatus()));
+        addConnections(connectorObject, connector.getName());
         return connectorObject;
     }
 
@@ -204,7 +210,53 @@ public class ConnectorResource implements MiApiResource {
         connectorObject.put(PACKAGE_ATTRIBUTE, library.getPackage());
         connectorObject.put(DESCRIPTION_ATTRIBUTE, library.getDescription());
         connectorObject.put(STATUS_ATTRIBUTE, getConnectorState(library.getLibStatus()));
+        addConnections(connectorObject, library.getName());
         jsonList.put(connectorObject);
+    }
+
+    /**
+     * Adds the list of the connections of a connector that registered their health. A connector with no
+     * registered connection gets no list.
+     *
+     * @param connectorObject the entry of the connector
+     * @param connector       the name of the connector
+     */
+    private void addConnections(JSONObject connectorObject, String connector) {
+        Map<String, Supplier<Map<String, Object>>> healthByName =
+                new TreeMap<>(ConnectionHealthRegistry.getConnections(connector));
+        if (healthByName.isEmpty()) {
+            return;
+        }
+        JSONArray connections = new JSONArray();
+        for (Map.Entry<String, Supplier<Map<String, Object>>> entry : healthByName.entrySet()) {
+            JSONObject connection = new JSONObject();
+            connection.put(NAME_ATTRIBUTE, entry.getKey());
+            Map<String, Object> health = getConnectionHealth(connector, entry.getKey(), entry.getValue());
+            if (health != null) {
+                if (health.get(STATUS_ATTRIBUTE) instanceof String) {
+                    connection.put(STATUS_ATTRIBUTE, health.get(STATUS_ATTRIBUTE));
+                }
+                connection.put(HEALTH_ATTRIBUTE, new JSONObject(health));
+            }
+            connections.put(connection);
+        }
+        connectorObject.put(CONNECTIONS_ATTRIBUTE, connections);
+    }
+
+    private Map<String, Object> getConnectionHealth(String connector, String connection,
+                                                    Supplier<Map<String, Object>> supplier) {
+        try {
+            Map<String, Object> health = supplier.get();
+            if (health == null) {
+                LOG.debug("No health for the connection " + connection + " of the connector " + connector);
+            }
+            return health;
+        } catch (Throwable t) {
+            // A failing health call of a connector never breaks the API.
+            LOG.debug("Health not available for the connection " + connection + " of the connector " + connector,
+                    t);
+            return null;
+        }
     }
 
     /**

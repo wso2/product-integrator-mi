@@ -34,7 +34,7 @@ public class MetricUtils {
 
     private static MetricReporter metricReporter = null;
 
-    public static MetricReporter getMetricReporter() {
+    public static synchronized MetricReporter getMetricReporter() {
         if (metricReporter == null) {
             metricReporter = generateMetricReporter();
         }

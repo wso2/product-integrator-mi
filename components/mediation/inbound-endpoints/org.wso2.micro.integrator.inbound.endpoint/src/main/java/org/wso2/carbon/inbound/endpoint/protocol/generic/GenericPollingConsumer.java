@@ -34,6 +34,7 @@ import org.apache.synapse.mediators.base.SequenceMediator;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.Map;
 import java.util.Properties;
 
 public abstract class GenericPollingConsumer {
@@ -83,6 +84,15 @@ public abstract class GenericPollingConsumer {
 
     public void destroy() {
         log.info("Default destroy invoked. Not overwritten.");
+    }
+
+    /**
+     * Health of the consumer for the management API. The default has no health to report.
+     *
+     * @return the health map, or null when the consumer does not report health
+     */
+    public Map<String, Object> getHealth() {
+        return null;
     }
 
     protected boolean injectMessage(String strMessage, String contentType) {

@@ -161,6 +161,7 @@ public class GenericProcessor extends InboundRequestProcessorImpl implements Tas
                 pollingConsumer = (GenericPollingConsumer) cons.newInstance(properties, name, synapseEnvironment,
                         interval, injectingSeq, onErrorSeq, coordination, sequential);
             }
+            GenericPollingConsumerRegistry.register(name, pollingConsumer);
 
         } catch (NoSuchMethodException e) {
             handleException("Required constructor is not implemented.", e);
@@ -192,9 +193,13 @@ public class GenericProcessor extends InboundRequestProcessorImpl implements Tas
      * undeployed/redeployed or when server stop
      */
     public void destroy() {
-        super.destroy();
-        //Terminate polling events
-        pollingConsumer.destroy();
+        try {
+            super.destroy();
+            //Terminate polling events
+            pollingConsumer.destroy();
+        } finally {
+            GenericPollingConsumerRegistry.unregister(name, pollingConsumer);
+        }
     }
 
     @Override

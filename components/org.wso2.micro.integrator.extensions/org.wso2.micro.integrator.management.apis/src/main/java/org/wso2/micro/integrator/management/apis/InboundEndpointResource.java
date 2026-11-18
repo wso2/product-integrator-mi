@@ -33,6 +33,8 @@ import org.json.JSONObject;
 import org.wso2.carbon.inbound.endpoint.internal.http.api.APIResource;
 import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericEventBasedConsumer;
 import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericEventBasedConsumerRegistry;
+import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericPollingConsumer;
+import org.wso2.carbon.inbound.endpoint.protocol.generic.GenericPollingConsumerRegistry;
 import org.wso2.micro.integrator.management.apis.security.handler.SecurityUtils;
 import org.wso2.micro.integrator.security.user.api.UserStoreException;
 import org.wso2.micro.core.util.AuditLogger;
@@ -273,11 +275,13 @@ public class InboundEndpointResource extends APIResource {
 
     private Map<String, Object> getConsumerHealth(InboundEndpoint inboundEndpoint) {
         GenericEventBasedConsumer consumer = GenericEventBasedConsumerRegistry.get(inboundEndpoint.getName());
-        if (consumer == null) {
+        GenericPollingConsumer pollingConsumer =
+                consumer == null ? GenericPollingConsumerRegistry.get(inboundEndpoint.getName()) : null;
+        if (consumer == null && pollingConsumer == null) {
             return null;
         }
         try {
-            return consumer.getHealth();
+            return consumer != null ? consumer.getHealth() : pollingConsumer.getHealth();
         } catch (Throwable t) {
             // A consumer compiled against an older base class, or a failing provider, never breaks the API.
             LOG.debug("Health not available for inbound endpoint " + inboundEndpoint.getName(), t);
