@@ -27,18 +27,26 @@ import java.util.function.Supplier;
  * Health of connector connections, for the management API. A connector registers the health of each connection
  * and unregisters it with the same supplier object. Each connection lifetime must own a distinct supplier,
  * including when it shares health state with a previous connection of the same name.
+ * Use the deployed library name in the form {@code {package}name} for registration, lookup and removal.
+ * Include the deployment prefix for a versioned package. Use {@code {}name} for a library with no package.
+ * A bare name is shorthand for the standard {@code org.wso2.carbon.connector} package.
  * Health values are strings, booleans, finite numbers, maps and lists of these values.
  */
 public final class ConnectionHealthRegistry {
 
+    private static final String STANDARD_PACKAGE_PREFIX = "{org.wso2.carbon.connector}";
     private static final Map<String, Map<String, Supplier<Map<String, Object>>>> connectors =
             new ConcurrentHashMap<>();
 
     private ConnectionHealthRegistry() {
     }
 
+    private static String libraryKey(String connector) {
+        return connector.startsWith("{") ? connector : STANDARD_PACKAGE_PREFIX + connector;
+    }
+
     public static void register(String connector, String connection, Supplier<Map<String, Object>> health) {
-        connectors.compute(connector, (name, connections) -> {
+        connectors.compute(libraryKey(connector), (name, connections) -> {
             if (connections == null) {
                 connections = new ConcurrentHashMap<>();
             }
@@ -48,7 +56,7 @@ public final class ConnectionHealthRegistry {
     }
 
     public static void unregister(String connector, String connection, Supplier<Map<String, Object>> health) {
-        connectors.computeIfPresent(connector, (name, connections) -> {
+        connectors.computeIfPresent(libraryKey(connector), (name, connections) -> {
             if (connections.get(connection) == health) {
                 connections.remove(connection);
             }
@@ -64,7 +72,7 @@ public final class ConnectionHealthRegistry {
      * @return the suppliers by connection name, or an empty map when none is registered
      */
     public static Map<String, Supplier<Map<String, Object>>> getConnections(String connector) {
-        Map<String, Supplier<Map<String, Object>>> connections = connectors.get(connector);
+        Map<String, Supplier<Map<String, Object>>> connections = connectors.get(libraryKey(connector));
         if (connections == null) {
             return Collections.emptyMap();
         }

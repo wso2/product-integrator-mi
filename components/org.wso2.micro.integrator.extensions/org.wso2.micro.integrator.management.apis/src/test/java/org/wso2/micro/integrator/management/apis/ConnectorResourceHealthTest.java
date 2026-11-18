@@ -43,6 +43,7 @@ import java.util.function.Supplier;
 public class ConnectorResourceHealthTest {
 
     private static final String CONNECTOR = "file";
+    private static final String STANDARD_PACKAGE = "org.wso2.carbon.connector";
 
     private final Map<String, Supplier<Map<String, Object>>> registered = new HashMap<>();
 
@@ -189,6 +190,57 @@ public class ConnectorResourceHealthTest {
     }
 
     @Test
+    public void testSameConnectionNameIsIsolatedByLibrary() throws Exception {
+        SynapseLibrary standard = library(STANDARD_PACKAGE);
+        SynapseLibrary custom = library("pkg.a");
+        SynapseLibrary other = library("pkg.b");
+        SynapseLibrary unpackaged = library(null);
+        SynapseLibrary versioned = new SynapseLibrary("artifact", CONNECTOR, STANDARD_PACKAGE);
+        String versionedName = versioned.getQName().toString();
+        Supplier<Map<String, Object>> standardHealth = health("active", 4L);
+        Supplier<Map<String, Object>> customHealth = health("failed", 1L);
+        Supplier<Map<String, Object>> otherHealth = health("recovering", 2L);
+        Supplier<Map<String, Object>> unpackagedHealth = health("idle", 3L);
+        Supplier<Map<String, Object>> versionedHealth = health("breaker_open", 6L);
+        try {
+            ConnectionHealthRegistry.register(CONNECTOR, "primary", standardHealth);
+            ConnectionHealthRegistry.register("{pkg.a}file", "primary", customHealth);
+            ConnectionHealthRegistry.register("{pkg.b}file", "primary", otherHealth);
+            ConnectionHealthRegistry.register("{}file", "primary", unpackagedHealth);
+            ConnectionHealthRegistry.register(versionedName, "primary", versionedHealth);
+
+            assertPrimaryStatus(standard, "active");
+            assertPrimaryStatus(custom, "failed");
+            assertPrimaryStatus(other, "recovering");
+            assertPrimaryStatus(unpackaged, "idle");
+            assertPrimaryStatus(versioned, "breaker_open");
+            ConnectionHealthRegistry.unregister("{pkg.a}file", "primary", customHealth);
+            Assert.assertFalse(listEntry(custom).has("connections"));
+            Assert.assertFalse(singleEntry(custom).has("connections"));
+            assertPrimaryStatus(other, "recovering");
+            assertPrimaryStatus(versioned, "breaker_open");
+            assertPrimaryStatus(standard, "active");
+        } finally {
+            ConnectionHealthRegistry.unregister(CONNECTOR, "primary", standardHealth);
+            ConnectionHealthRegistry.unregister("{pkg.a}file", "primary", customHealth);
+            ConnectionHealthRegistry.unregister("{pkg.b}file", "primary", otherHealth);
+            ConnectionHealthRegistry.unregister("{}file", "primary", unpackagedHealth);
+            ConnectionHealthRegistry.unregister(versionedName, "primary", versionedHealth);
+        }
+    }
+
+    private static void assertPrimaryStatus(SynapseLibrary library, String status) throws Exception {
+        for (JSONObject entry : new JSONObject[]{listEntry(library), singleEntry(library)}) {
+            JSONArray connections = entry.getJSONArray("connections");
+            Assert.assertEquals(1, connections.length());
+            JSONObject primary = connections.getJSONObject(0);
+            Assert.assertEquals("primary", primary.getString("name"));
+            Assert.assertEquals(status, primary.getString("status"));
+            Assert.assertEquals(status, primary.getJSONObject("health").getString("status"));
+        }
+    }
+
+    @Test
     public void testAtomicCountersKeepTheirNumericValue() throws Exception {
         long count = 9007199254740993L;
         AtomicLong files = new AtomicLong(count);
@@ -200,9 +252,10 @@ public class ConnectorResourceHealthTest {
         for (JSONObject entry : entries) {
             JSONObject health = entry.getJSONArray("connections").getJSONObject(0).getJSONObject("health");
             Assert.assertTrue(health.get("files") instanceof Number);
-            Assert.assertEquals(count, health.getLong("files"));
+            Assert.assertEquals(0, BigDecimal.valueOf(count).compareTo(health.getBigDecimal("files")));
             Assert.assertTrue(health.getJSONArray("pending").get(0) instanceof Number);
-            Assert.assertEquals(3, health.getJSONArray("pending").getInt(0));
+            Assert.assertEquals(0, BigDecimal.valueOf(3).compareTo(
+                    health.getJSONArray("pending").getBigDecimal(0)));
         }
     }
 
@@ -266,26 +319,34 @@ public class ConnectorResourceHealthTest {
         Assert.assertEquals("Only the name is printed", 1, connection.length());
     }
 
-    private static SynapseLibrary library() {
-        SynapseLibrary library = new SynapseLibrary(CONNECTOR, "org.wso2.carbon.connector");
+    private static SynapseLibrary library(String namespace) {
+        SynapseLibrary library = new SynapseLibrary(CONNECTOR, namespace);
         library.setLibStatus(true);
         return library;
     }
 
     // The entry of the list and of the search.
     private static JSONObject listEntry() throws Exception {
+        return listEntry(library(STANDARD_PACKAGE));
+    }
+
+    private static JSONObject listEntry(SynapseLibrary library) throws Exception {
         Method add = ConnectorResource.class.getDeclaredMethod("addToJsonList", JSONArray.class,
                 SynapseLibrary.class);
         add.setAccessible(true);
         JSONArray list = new JSONArray();
-        add.invoke(new ConnectorResource(), list, library());
+        add.invoke(new ConnectorResource(), list, library);
         return list.getJSONObject(0);
     }
 
     // The entry of the single view.
     private static JSONObject singleEntry() throws Exception {
+        return singleEntry(library(STANDARD_PACKAGE));
+    }
+
+    private static JSONObject singleEntry(SynapseLibrary library) throws Exception {
         Method get = ConnectorResource.class.getDeclaredMethod("getConnectorAsJson", SynapseLibrary.class);
         get.setAccessible(true);
-        return (JSONObject) get.invoke(new ConnectorResource(), library());
+        return (JSONObject) get.invoke(new ConnectorResource(), library);
     }
 }

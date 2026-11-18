@@ -181,7 +181,7 @@ public class ConnectorResource implements MiApiResource {
         connectorObject.put(PACKAGE_ATTRIBUTE, connector.getPackage());
         connectorObject.put(DESCRIPTION_ATTRIBUTE, connector.getDescription());
         connectorObject.put(STATUS_ATTRIBUTE, getConnectorState(connector.getLibStatus()));
-        addConnections(connectorObject, connector.getName());
+        addConnections(connectorObject, connector);
         return connectorObject;
     }
 
@@ -210,7 +210,7 @@ public class ConnectorResource implements MiApiResource {
         connectorObject.put(PACKAGE_ATTRIBUTE, library.getPackage());
         connectorObject.put(DESCRIPTION_ATTRIBUTE, library.getDescription());
         connectorObject.put(STATUS_ATTRIBUTE, getConnectorState(library.getLibStatus()));
-        addConnections(connectorObject, library.getName());
+        addConnections(connectorObject, library);
         jsonList.put(connectorObject);
     }
 
@@ -219,9 +219,10 @@ public class ConnectorResource implements MiApiResource {
      * registered connection gets no list.
      *
      * @param connectorObject the entry of the connector
-     * @param connector       the name of the connector
+     * @param library         the deployed connector library
      */
-    private void addConnections(JSONObject connectorObject, String connector) {
+    private void addConnections(JSONObject connectorObject, SynapseLibrary library) {
+        String connector = "{" + library.getQName().getNamespaceURI() + "}" + library.getName();
         Map<String, Supplier<Map<String, Object>>> healthByName =
                 new TreeMap<>(ConnectionHealthRegistry.getConnections(connector));
         if (healthByName.isEmpty()) {

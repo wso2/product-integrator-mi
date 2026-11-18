@@ -42,6 +42,21 @@ public class ConnectionHealthRegistryTest {
     }
 
     @Test
+    public void testStandardPackageAliasIdentifiesTheSameRegistration() {
+        String qualified = "{org.wso2.carbon.connector}sample";
+        Supplier<Map<String, Object>> health = Collections::emptyMap;
+        ConnectionHealthRegistry.register("sample", "primary", health);
+        try {
+            Assert.assertSame(health, ConnectionHealthRegistry.getConnections(qualified).get("primary"));
+            Assert.assertTrue(ConnectionHealthRegistry.getConnections("{}sample").isEmpty());
+            ConnectionHealthRegistry.unregister(qualified, "primary", health);
+            Assert.assertTrue(ConnectionHealthRegistry.getConnections("sample").isEmpty());
+        } finally {
+            ConnectionHealthRegistry.unregister("sample", "primary", health);
+        }
+    }
+
+    @Test
     public void testUnknownConnectorHasNoConnection() {
         Assert.assertTrue(ConnectionHealthRegistry.getConnections("unknown").isEmpty());
     }
@@ -111,7 +126,7 @@ public class ConnectionHealthRegistryTest {
 
     @Test
     public void testLastConnectionReleasesItsLibrary() throws Exception {
-        String library = "retiredLibrary";
+        String library = "{pkg}retiredLibrary";
         Supplier<Map<String, Object>> first = new EqualHealth();
         Supplier<Map<String, Object>> second = new EqualHealth();
         Field field = ConnectionHealthRegistry.class.getDeclaredField("connectors");
@@ -120,6 +135,7 @@ public class ConnectionHealthRegistryTest {
         ConnectionHealthRegistry.register(library, "first", first);
         Map<String, Supplier<Map<String, Object>>> snapshot = ConnectionHealthRegistry.getConnections(library);
         try {
+            Assert.assertTrue(libraries.containsKey(library));
             ConnectionHealthRegistry.register(library, "second", second);
             ConnectionHealthRegistry.unregister(library, "first", first);
             Assert.assertSame(second, ConnectionHealthRegistry.getConnections(library).get("second"));
