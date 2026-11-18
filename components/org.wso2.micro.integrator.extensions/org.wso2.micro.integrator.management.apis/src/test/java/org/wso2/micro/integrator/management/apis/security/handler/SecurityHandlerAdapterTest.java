@@ -146,4 +146,42 @@ public class SecurityHandlerAdapterTest {
         Assert.assertFalse("The bare management API root context should not be handled by the security handler, but it was.",
                             internalAPIHandler.isHandleTriggered());
     }
+
+        /**
+     * A request path that does not start with the handler's context must not be handled, even when it ends
+     * with a configured resource.
+     */
+    @Test
+    public void testPathOutsideHandlerContextIsNotHandled() {
+
+        MessageContext messageContext = new TestMessageContext();
+
+        TestSecurityHandler internalAPIHandler = new TestSecurityHandler("/sectest");
+        List<String> resources = new ArrayList<>();
+        resources.add("/resource1");
+        internalAPIHandler.setResources(resources);
+
+        messageContext.setProperty(RESTConstants.REST_FULL_REQUEST_PATH, "/othercontext/resource1");
+        internalAPIHandler.invoke(messageContext);
+        Assert.assertFalse("Handler should not be engaged for a path outside its context, but it was engaged.",
+                           internalAPIHandler.isHandleTriggered());
+    }
+
+    /**
+     * Only the bare management API root context is exempt. A path below the root context must still be handled.
+     */
+    @Test
+    public void testPathBelowRootContextIsHandled() {
+
+        MessageContext messageContext = new TestMessageContext();
+
+        TestSecurityHandler internalAPIHandler = new TestSecurityHandler(Constants.REST_API_CONTEXT);
+        internalAPIHandler.setResources(new ArrayList<>());
+
+        messageContext.setProperty(RESTConstants.REST_FULL_REQUEST_PATH,
+                Constants.REST_API_CONTEXT + "/users");
+        internalAPIHandler.invoke(messageContext);
+        Assert.assertTrue("Handler should be engaged for a path below the root context, but it was not engaged.",
+                          internalAPIHandler.isHandleTriggered());
+    }
 }
