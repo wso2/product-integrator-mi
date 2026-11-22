@@ -46,6 +46,8 @@ import org.apache.synapse.mediators.builtin.CallMediator;
 import org.apache.synapse.mediators.builtin.DropMediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.builtin.ValidateMediator;
+import org.apache.synapse.mediators.eip.Target;
+import org.apache.synapse.mediators.eip.splitter.CloneMediator;
 import org.apache.synapse.mediators.filters.FilterMediator;
 import org.apache.synapse.mediators.filters.SwitchMediator;
 import org.apache.synapse.transport.passthru.PassThroughConstants;
@@ -64,6 +66,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
@@ -110,6 +113,30 @@ public class MicroIntegratorSequenceControllerTest {
         resume();
         assertEvents("call", "main resumed", "fault", "shutdown");
     }
+
+    @Test
+    public void waitsForCloneBranchContinuationWhenParentStops() throws AxisFault {
+        SequenceMediator branch = sequence("clone-branch", nonBlockingCall(), event("clone branch resumed"));
+        Target target = new Target();
+        target.setSequenceRef(branch.getName());
+        // Start the branch on the test thread. Its Call still suspends until the callback.
+        target.setAsynchronous(false);
+        CloneMediator clone = new CloneMediator();
+        clone.setContinueParent(false);
+        clone.setSequential(true);
+        clone.addTarget(target);
+        SequenceMediator main = sequence("main", clone);
+        MessageContext parent = environment.createMessageContext();
+
+        inject(main, parent);
+        assertEvents("call");
+        assertNotSame(parent, pendingCall);
+
+        resume();
+
+        assertEvents("call", "clone branch resumed", "shutdown");
+    }
+
 
     @Test
     public void buildsDeferredResponseAfterRequestWasMarkedBuilt() throws AxisFault {
