@@ -29,6 +29,8 @@ import org.apache.synapse.ServerContextInformation;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.config.SynapseConfiguration;
+import org.apache.synapse.config.xml.AnonymousListMediator;
+import org.apache.synapse.config.xml.SwitchCase;
 import org.apache.synapse.core.axis2.AsyncCallback;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
 import org.apache.synapse.core.axis2.Axis2SynapseEnvironment;
@@ -40,6 +42,7 @@ import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.mediators.builtin.CallMediator;
 import org.apache.synapse.mediators.builtin.DropMediator;
 import org.apache.synapse.mediators.filters.FilterMediator;
+import org.apache.synapse.mediators.filters.SwitchMediator;
 import org.apache.synapse.util.xpath.SynapseXPath;
 import org.jaxen.JaxenException;
 import org.junit.After;
@@ -51,6 +54,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 
 /**
  * Exercises automation sequence completion using Synapse mediation with an in-memory call endpoint.
@@ -193,6 +197,97 @@ public class MicroIntegratorSequenceControllerTest {
         inject(sequence("main", reference));
         assertEvents("nested fault", "shutdown");
     }
+
+    @Test
+    public void preservesDeployedNestedChildrenAcrossAutomationRuns() throws JaxenException {
+        Mediator beforeDrop = event("before drop");
+        Mediator drop = new DropMediator();
+        FilterMediator filter = new FilterMediator();
+        filter.setXpath(new SynapseXPath("true()"));
+        filter.setRegex(Pattern.compile("true"));
+        filter.addChild(beforeDrop);
+        filter.addChild(drop);
+        SequenceMediator main = sequence("main", filter);
+
+        inject(main);
+        List<Mediator> childrenAfterFirstRun = new ArrayList<>(filter.getList());
+
+        MessageContext secondContext = environment.createMessageContext();
+        secondContext.setProperty(ServiceBusConstants.AUTOMATION_MODE_MAIN_SEQ_PROPERTY, main.getName());
+        MicroIntegratorSequenceController secondController =
+                new MicroIntegratorSequenceController(() -> events.add("second shutdown"));
+        secondController.inject(secondContext, main);
+
+        assertSame(filter, main.getChild(0));
+        assertEquals(2, childrenAfterFirstRun.size());
+        assertSame(beforeDrop, childrenAfterFirstRun.get(0));
+        assertSame("First run replaced the deployed drop", drop, childrenAfterFirstRun.get(1));
+        assertEquals(2, filter.getList().size());
+        assertSame(beforeDrop, filter.getChild(0));
+        assertSame("Second run replaced the deployed drop", drop, filter.getChild(1));
+        assertEvents("before drop", "shutdown", "before drop", "second shutdown");
+    }
+
+
+    @Test
+    public void shutsDownAfterDropInMatchingSwitchCase() throws JaxenException {
+        Mediator beforeDrop = event("case");
+        Mediator drop = new DropMediator();
+        SwitchCase matching = switchBranch("selected", beforeDrop, drop);
+        SwitchMediator mediator = switchSelecting("selected", matching);
+        mediator.setDefaultCase(switchBranch(null, event("default")));
+
+        inject(sequence("main", mediator, event("after switch")));
+
+        assertEvents("case", "shutdown");
+        assertSame(matching, mediator.getCases().get(0));
+        assertEquals(Arrays.asList(beforeDrop, drop), matching.getCaseMediator().getList());
+    }
+
+    @Test
+    public void shutsDownAfterDropInDefaultSwitchCase() throws JaxenException {
+        Mediator beforeDrop = event("default");
+        Mediator drop = new DropMediator();
+        SwitchCase fallback = switchBranch(null, beforeDrop, drop);
+        SwitchMediator mediator = switchSelecting("other", switchBranch("selected", event("case")));
+        mediator.setDefaultCase(fallback);
+
+        inject(sequence("main", mediator, event("after switch")));
+
+        assertEvents("default", "shutdown");
+        assertSame(fallback, mediator.getDefaultCase());
+        assertEquals(Arrays.asList(beforeDrop, drop), fallback.getCaseMediator().getList());
+    }
+
+    @Test
+    public void continuesAfterSuccessfulSwitchCase() throws JaxenException {
+        SwitchMediator mediator = switchSelecting("selected", switchBranch("selected", event("case")));
+        mediator.addCase(switchBranch(".*", event("later case")));
+        mediator.setDefaultCase(switchBranch(null, event("default")));
+
+        inject(sequence("main", mediator, event("after switch")));
+
+        assertEvents("case", "after switch", "shutdown");
+    }
+
+    private SwitchMediator switchSelecting(String value, SwitchCase branch) throws JaxenException {
+        SwitchMediator mediator = new SwitchMediator();
+        mediator.setSource(new SynapseXPath("'" + value + "'"));
+        mediator.addCase(branch);
+        return mediator;
+    }
+
+    private SwitchCase switchBranch(String regex, Mediator... children) {
+        SwitchCase branch = new SwitchCase();
+        if (regex != null) {
+            branch.setRegex(Pattern.compile(regex));
+        }
+        AnonymousListMediator list = new AnonymousListMediator();
+        Arrays.stream(children).forEach(list::addChild);
+        branch.setCaseMediator(list);
+        return branch;
+    }
+
 
     private void inject(SequenceMediator main) {
         MessageContext context = environment.createMessageContext();

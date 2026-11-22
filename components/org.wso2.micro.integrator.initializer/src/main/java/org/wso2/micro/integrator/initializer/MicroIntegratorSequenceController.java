@@ -22,10 +22,13 @@ import org.apache.synapse.Mediator;
 import org.apache.synapse.MessageContext;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.config.SynapseConfiguration;
+import org.apache.synapse.config.xml.AnonymousListMediator;
+import org.apache.synapse.config.xml.SwitchCase;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.mediators.Value;
 import org.apache.synapse.mediators.ListMediator;
-import org.apache.synapse.mediators.AbstractListMediator;
+import org.apache.synapse.mediators.filters.FilterMediator;
+import org.apache.synapse.mediators.filters.SwitchMediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.mediators.builtin.DropMediator;
@@ -41,6 +44,9 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MicroIntegratorSequenceController {
+
+    private static final String AUTOMATION_OWNER_PROPERTY =
+            MicroIntegratorSequenceController.class.getName() + ".automationOwner";
 
     private final AtomicBoolean completed = new AtomicBoolean();
     private final Runnable shutdown;
@@ -71,6 +77,7 @@ public class MicroIntegratorSequenceController {
 
         // Synapse resolves named sequences from the configuration when a non-blocking call resumes.
         configuration.addSequence(main.getName(), main);
+        context.setProperty(AUTOMATION_OWNER_PROPERTY, runName);
         context.getEnvironment().injectMessage(context, main);
     }
 
@@ -172,71 +179,148 @@ public class MicroIntegratorSequenceController {
             if (mediator instanceof SequenceMediator) {
                 SequenceMediator sequenceReference = (SequenceMediator) mediator;
                 Value key = sequenceReference.getKey();
-                if (key != null && key.getKeyValue() != null
-                        && key.getExpression() == null) {
-                    String referencedName = key.getKeyValue();
-                    Mediator referenced = context.getSequence(referencedName);
-                    if (referenced instanceof SequenceMediator) {
-                        String privateName = wrappedSequences.get(referencedName);
-                        if (privateName == null) {
-                            privateName = runName + "-sequence-" + UUID.randomUUID();
-                            wrappedSequences.put(referencedName, privateName);
-                            SequenceMediator wrapped = new AutomationSequence(privateName,
-                                    (SequenceMediator) referenced, context, configuration, runName, false);
-                            configuration.addSequence(privateName, wrapped);
+                if (key != null && key.getExpression() != null) {
+                    return copyReference(sequenceReference, new Value(key.getExpression()) {
+                        @Override
+                        public String evaluateValue(MessageContext messageContext) {
+                            String name = key.evaluateValue(messageContext);
+                            if (!runName.equals(messageContext.getProperty(AUTOMATION_OWNER_PROPERTY))) {
+                                return name;
+                            }
+                            return resolveWrappedSequence(name, messageContext, configuration, runName);
                         }
-                        SequenceMediator referenceCopy = new SequenceMediator();
-                        referenceCopy.setKey(new Value(privateName));
-                        referenceCopy.setName(sequenceReference.getName());
-                        referenceCopy.setErrorHandler(sequenceReference.getErrorHandler());
-                        referenceCopy.setArtifactContainerName(
-                                sequenceReference.getArtifactContainerName());
-                        referenceCopy.setDynamic(sequenceReference.isDynamic());
-                        referenceCopy.setRegistryKey(sequenceReference.getRegistryKey());
-                        referenceCopy.setTraceState(sequenceReference.getTraceState());
-                        referenceCopy.setMediatorPosition(sequenceReference.getMediatorPosition());
-                        referenceCopy.configure(sequenceReference.getAspectConfiguration());
-                        return referenceCopy;
+                    });
+                }
+                if (key != null && key.getKeyValue() != null) {
+                    String name = key.getKeyValue();
+                    String privateName = resolveWrappedSequence(name, context, configuration, runName);
+                    if (!name.equals(privateName)) {
+                        return copyReference(sequenceReference, new Value(privateName));
                     }
                 }
             }
             if (mediator instanceof DropMediator) {
-                return new AutomationDropMediator();
-            }
-            if (mediator instanceof ListMediator) {
-                ListMediator listMediator = (ListMediator) mediator;
-                for (int i = 0; i < listMediator.getList().size(); i++) {
-                    Mediator child = listMediator.getChild(i);
-                    Mediator wrappedChild = wrapMediator(child, context, configuration, runName);
-                    if (wrappedChild != child) {
-                        listMediator.removeChild(i);
-                        if (listMediator instanceof AbstractListMediator) {
-                            ((AbstractListMediator) listMediator).addChild(i, wrappedChild);
-                        } else {
-                            listMediator.addChild(wrappedChild);
-                        }
-                    }
-                }
+                return new AutomationDropMediator(runName);
             }
             if (mediator instanceof ForEachMediator) {
-                ForEachMediator forEach = (ForEachMediator) mediator;
-                if (forEach.getSequenceRef() != null) {
-                    Mediator referenced = context.getSequence(forEach.getSequenceRef());
-                    if (referenced instanceof SequenceMediator) {
-                        String privateName = wrappedSequences.get(forEach.getSequenceRef());
-                        if (privateName == null) {
-                            privateName = runName + "-sequence-" + UUID.randomUUID();
-                            wrappedSequences.put(forEach.getSequenceRef(), privateName);
-                            SequenceMediator wrapped = new AutomationSequence(privateName,
-                                    (SequenceMediator) referenced, context, configuration, runName, false);
-                            configuration.addSequence(privateName, wrapped);
-                        }
-                        forEach.setSequenceRef(privateName);
-                    }
-                }
+                // ForEach consumes a drop in its iteration and continues the enclosing flow.
+                return mediator;
+            }
+            if (mediator instanceof FilterMediator) {
+                return copyFilter((FilterMediator) mediator, context, configuration, runName);
+            }
+            if (mediator instanceof SwitchMediator) {
+                return copySwitch((SwitchMediator) mediator, context, configuration, runName);
             }
             return mediator;
         }
+
+        private FilterMediator copyFilter(FilterMediator original, MessageContext context,
+                                          SynapseConfiguration configuration, String runName) {
+            FilterMediator copy = new FilterMediator();
+            copy.setSource(original.getSource());
+            copy.setRegex(original.getRegex());
+            if (original.getXpath() != null) {
+                copy.setXpath(original.getXpath());
+            }
+            copy.setThenElementPresent(original.isThenElementPresent());
+            copy.setThenKey(resolveWrappedSequence(original.getThenKey(), context, configuration, runName));
+            copy.setElseKey(resolveWrappedSequence(original.getElseKey(), context, configuration, runName));
+            copy.setTraceState(original.getTraceState());
+            copy.setMediatorPosition(original.getMediatorPosition());
+            copy.configure(original.getAspectConfiguration());
+            for (Mediator child : original.getList()) {
+                copy.addChild(wrapMediator(child, context, configuration, runName));
+            }
+
+            ListMediator originalElse = original.getElseMediator();
+            if (originalElse != null) {
+                AnonymousListMediator elseCopy = new AnonymousListMediator();
+                elseCopy.setTraceState(originalElse.getTraceState());
+                for (Mediator child : originalElse.getList()) {
+                    elseCopy.addChild(wrapMediator(child, context, configuration, runName));
+                }
+                copy.setElseMediator(elseCopy);
+            }
+            return copy;
+        }
+
+
+        private SwitchMediator copySwitch(SwitchMediator original, MessageContext context,
+                                          SynapseConfiguration configuration, String runName) {
+            SwitchMediator copy = new SwitchMediator();
+            copy.setSource(original.getSource());
+            copy.setTraceState(original.getTraceState());
+            copy.setMediatorPosition(original.getMediatorPosition());
+            copy.configure(original.getAspectConfiguration());
+            for (SwitchCase branch : original.getCases()) {
+                copy.addCase(copySwitchCase(branch, context, configuration, runName));
+            }
+            if (original.getDefaultCase() != null) {
+                copy.setDefaultCase(copySwitchCase(original.getDefaultCase(), context, configuration, runName));
+            }
+            return copy;
+        }
+
+        private SwitchCase copySwitchCase(SwitchCase original, MessageContext context,
+                                          SynapseConfiguration configuration, String runName) {
+            AnonymousListMediator originalBranch = original.getCaseMediator();
+            AnonymousListMediator branch = new AnonymousListMediator();
+            branch.setTraceState(originalBranch.getTraceState());
+            branch.setMediatorPosition(originalBranch.getMediatorPosition());
+            branch.configure(originalBranch.getAspectConfiguration());
+            for (Mediator child : originalBranch.getList()) {
+                branch.addChild(wrapMediator(child, context, configuration, runName));
+            }
+            SwitchCase copy = new SwitchCase();
+            copy.setRegex(original.getRegex());
+            copy.setCaseMediator(branch);
+            return copy;
+        }
+
+
+        private String resolveWrappedSequence(String name, MessageContext context,
+                                              SynapseConfiguration configuration, String runName) {
+            if (name == null) {
+                return null;
+            }
+            synchronized (MicroIntegratorSequenceController.this) {
+                String privateName = wrappedSequences.get(name);
+                if (privateName != null) {
+                    return privateName;
+                }
+                Mediator referenced = context.getSequence(name);
+                if (!(referenced instanceof SequenceMediator)) {
+                    return name;
+                }
+                privateName = runName + "-sequence-" + UUID.randomUUID();
+                wrappedSequences.put(name, privateName);
+                try {
+                    SequenceMediator wrapped = new AutomationSequence(privateName,
+                            (SequenceMediator) referenced, context, configuration, runName, false);
+                    configuration.addSequence(privateName, wrapped);
+                    return privateName;
+                } catch (RuntimeException e) {
+                    wrappedSequences.remove(name);
+                    throw e;
+                }
+            }
+        }
+
+        private SequenceMediator copyReference(SequenceMediator original, Value key) {
+            SequenceMediator copy = new SequenceMediator();
+            copy.setKey(key);
+            copy.setName(original.getName());
+            copy.setErrorHandler(original.getErrorHandler());
+            copy.setArtifactContainerName(original.getArtifactContainerName());
+            copy.setDynamic(original.isDynamic());
+            copy.setRegistryKey(original.getRegistryKey());
+            copy.setTraceState(original.getTraceState());
+            copy.setMediatorPosition(original.getMediatorPosition());
+            copy.configure(original.getAspectConfiguration());
+            return copy;
+        }
+
 
         private void buildMessage(MessageContext context) {
             if (!contentAware || Boolean.TRUE.equals(context.getProperty("message.builder.invoked"))) {
@@ -261,10 +345,17 @@ public class MicroIntegratorSequenceController {
 
     private class AutomationDropMediator extends DropMediator {
 
+        private final String owner;
+
+        AutomationDropMediator(String owner) {
+            this.owner = owner;
+        }
+
         @Override
         public boolean mediate(MessageContext context) {
             boolean result = super.mediate(context);
-            if (completed.compareAndSet(false, true)) {
+            if (owner.equals(context.getProperty(AUTOMATION_OWNER_PROPERTY))
+                    && completed.compareAndSet(false, true)) {
                 shutdown.run();
             }
             return result;

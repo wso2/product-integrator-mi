@@ -118,3 +118,22 @@ This was the complete-distribution check I had been missing earlier. It did not 
 - I checked the fault exit code only after the shutdown test. Next time I’d record the launcher’s exit code immediately for both runs. Seeing the PowerShell prompt return proves the process ended. Checking the exit code tells me what the launcher reported to its caller.
 
 I ran the Windows builds and reproduction checks and captured the results. I used AI to help me understand how MI and Synapse handle sequence completion in automation mode. In particular, it helped me break down how MI uses a Synapse sequence observer to trigger graceful shutdown and how that callback differs from the return value of `injectMessage(...)`.
+
+## Follow-up regressions after review
+
+I reproduced four additional shutdown cases on Windows and retested them on the updated distribution.
+
+| Case | What I reproduced | What I verified after the change |
+| --- | --- | --- |
+| Shared sequence invoked while automation waits | An unrelated API request reached a drop and started shutdown before the automation response was released. | The API request reached the drop while automation remained suspended. Shutdown began after automation resumed and finished. |
+| Drop consumed by ForEach | The loop returned control to the outer sequence, but shutdown began while its delayed HTTP call was pending. | The outer sequence waited for the five-second response and logged its final marker before shutdown. |
+| Expression-selected child sequence | The child fault handler finished, but MI stayed running until I pressed Ctrl+C. | MI began graceful shutdown after the child fault handler finished and exited on its own. |
+| Terminal drop in a switch case | The matching case reached the drop and ended mediation, but MI stayed running until I pressed Ctrl+C. | The pre-drop marker appeared, the post-switch marker stayed absent, and MI completed graceful shutdown on its own. |
+
+I scoped drop-triggered shutdown to the owning automation invocation, kept the original ForEach iteration behavior, and resolved expression-selected sequences at mediation time. A focused two-invocation test also reproduced mutation of the deployed filter's children. Automation now creates private filter and switch branch containers before wrapping their children. The controller tests check matching and default switch drops, normal switch continuation, and preservation of the deployed branch children.
+
+All 15 tests in `MicroIntegratorSequenceControllerTest` passed with zero failures, errors, or skips. On the packaged Windows runtime, all nine launcher retests exited with code `0` and logged their expected markers before shutdown began. These were normal completion, synchronous fault, async main fault, async fault handler, terminal drop, ordinary sequence call, shared A/B, delayed ForEach, and dynamic fault. The separate switch CAR also completed graceful shutdown and exited on its own. The tested initializer JAR matched the module build by SHA-256:
+
+`F9C47A212EF485F4201433A7131FA9DE8254D7AFA3516B47E1C7EA808A58DC7B`
+
+These results cover the mediator paths exercised by the fixtures.
