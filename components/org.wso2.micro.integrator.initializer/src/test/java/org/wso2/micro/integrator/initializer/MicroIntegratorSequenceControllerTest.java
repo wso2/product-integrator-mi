@@ -63,6 +63,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
@@ -115,20 +117,22 @@ public class MicroIntegratorSequenceControllerTest {
     }
 
     @Test
-    public void waitsForCloneBranchContinuationWhenParentStops() throws AxisFault {
-        SequenceMediator branch = sequence("clone-branch", nonBlockingCall(), event("clone branch resumed"));
+    public void waitsForCloneBranchContinuationWhenParentStops() throws Exception {
+        CountDownLatch callStarted = new CountDownLatch(1);
+        SequenceMediator branch = sequence("clone-branch", nonBlockingCall(callStarted::countDown),
+                event("clone branch resumed"));
         Target target = new Target();
         target.setSequenceRef(branch.getName());
-        // Start the branch on the test thread. Its Call still suspends until the callback.
-        target.setAsynchronous(false);
+        target.setAsynchronous(true);
         CloneMediator clone = new CloneMediator();
         clone.setContinueParent(false);
-        clone.setSequential(true);
+        clone.setSequential(false);
         clone.addTarget(target);
         SequenceMediator main = sequence("main", clone);
         MessageContext parent = environment.createMessageContext();
 
         inject(main, parent);
+        assertTrue("Clone target did not start its call", callStarted.await(5, TimeUnit.SECONDS));
         assertEvents("call");
         assertNotSame(parent, pendingCall);
 
@@ -531,6 +535,10 @@ public class MicroIntegratorSequenceControllerTest {
     }
 
     private CallMediator nonBlockingCall() {
+        return nonBlockingCall(() -> { });
+    }
+
+    private CallMediator nonBlockingCall(Runnable onSend) {
         CallMediator call = new CallMediator();
         call.setBlocking(false);
         call.setEndpoint(new AddressEndpoint() {
@@ -538,6 +546,7 @@ public class MicroIntegratorSequenceControllerTest {
             public void send(MessageContext context) {
                 events.add("call");
                 pendingCall = context;
+                onSend.run();
             }
         });
         return call;
