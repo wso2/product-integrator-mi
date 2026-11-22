@@ -60,6 +60,7 @@ import org.wso2.config.mapper.ConfigParser;
 import org.wso2.micro.application.deployer.CarbonApplication;
 import org.wso2.micro.core.Constants;
 import org.wso2.micro.core.ServerShutdownHandler;
+import org.wso2.micro.core.util.CoreServerInitializerHolder;
 import org.wso2.integration.transaction.counter.TransactionCountHandler;
 import org.wso2.micro.integrator.core.services.Axis2ConfigurationContextService;
 import org.wso2.micro.integrator.core.services.CarbonServerConfigurationService;
@@ -263,11 +264,14 @@ public class ServiceBusInitializer {
                 String sequenceName = getMainSequenceName(injectCarName);
                 if (sequenceName != null) {
                     MessageContext synCtx = synapseEnvironment.createMessageContext();
-                    SequenceMediator seq = (SequenceMediator) synapseEnvironment.getSynapseConfiguration().
-                            getSequence(sequenceName);
-                    synapseEnvironment.getSequenceObservers().add(new MicroIntegratorSequenceController());
+                    SequenceMediator seq = (SequenceMediator) synCtx.getSequence(sequenceName);
                     synCtx.setProperty(ServiceBusConstants.AUTOMATION_MODE_MAIN_SEQ_PROPERTY, sequenceName);
-                    synCtx.getEnvironment().injectMessage(synCtx, seq);
+                    if (seq != null) {
+                        new MicroIntegratorSequenceController(ServiceBusInitializer::shutdownAutomation)
+                                .inject(synCtx, seq);
+                    } else {
+                        log.error("Automation main sequence " + sequenceName + " not found");
+                    }
                 }
             }
         } catch (Exception e) {
@@ -278,6 +282,12 @@ public class ServiceBusInitializer {
         if (log.isDebugEnabled()) {
             log.debug(ServiceBusInitializer.class.getName() + "#activate() COMPLETED - " + System.currentTimeMillis());
         }
+    }
+
+    private static void shutdownAutomation() {
+        // Shutdown can wait for mediation to drain, so let the Synapse callback thread return first.
+        new Thread(() -> CoreServerInitializerHolder.getInstance().shutdownGracefully(),
+                "automation-shutdown").start();
     }
 
     private String getMainSequenceName(String cappName) {
