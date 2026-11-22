@@ -20,6 +20,7 @@ package org.wso2.micro.integrator.initializer;
 
 import org.apache.axiom.om.util.AXIOMUtil;
 import org.apache.axis2.AxisFault;
+import org.apache.axis2.Constants;
 import org.apache.axis2.addressing.RelatesTo;
 import org.apache.axis2.context.ConfigurationContext;
 import org.apache.axis2.engine.AxisConfiguration;
@@ -47,11 +48,16 @@ import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.builtin.ValidateMediator;
 import org.apache.synapse.mediators.filters.FilterMediator;
 import org.apache.synapse.mediators.filters.SwitchMediator;
+import org.apache.synapse.transport.passthru.PassThroughConstants;
+import org.apache.synapse.transport.passthru.Pipe;
 import org.apache.synapse.util.xpath.SynapseXPath;
 import org.jaxen.JaxenException;
 import org.junit.After;
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -102,6 +108,44 @@ public class MicroIntegratorSequenceControllerTest {
         assertEvents("call");
         resume();
         assertEvents("call", "main resumed", "fault", "shutdown");
+    }
+
+    @Test
+    public void buildsDeferredResponseAfterRequestWasMarkedBuilt() throws AxisFault {
+        SequenceMediator main = sequence("main", nonBlockingCall(), readPayload());
+
+        inject(main);
+        assertEvents("call");
+        pendingCall.setProperty("message.builder.invoked", Boolean.TRUE);
+        resume(new Pipe(null, "automation test response", null) {
+            @Override
+            public synchronized InputStream getInputStream() {
+                String envelope = "<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'>"
+                        + "<soap:Body><response>backend response</response></soap:Body>"
+                        + "</soap:Envelope>";
+                return new ByteArrayInputStream(envelope.getBytes(StandardCharsets.UTF_8));
+            }
+        });
+
+        assertEvents("call", "backend response", "shutdown");
+    }
+
+    @Test
+    public void routesMessageBuildFailureToSequenceErrorHandler() {
+        sequence("fault", event("fault"));
+        SequenceMediator main = sequence("main", event("before build"), readPayload());
+        main.setErrorHandler("fault");
+        Axis2MessageContext context = (Axis2MessageContext) environment.createMessageContext();
+        configureDeferredPayload(context, new Pipe(null, "automation test request", null) {
+            @Override
+            public synchronized InputStream getInputStream() {
+                throw new IllegalStateException("Expected automation test build failure");
+            }
+        });
+
+        inject(main, context);
+
+        assertEvents("before build", "fault", "shutdown");
     }
 
     @Test
@@ -370,16 +414,26 @@ public class MicroIntegratorSequenceControllerTest {
 
 
     private void inject(SequenceMediator main) {
-        MessageContext context = environment.createMessageContext();
+        inject(main, environment.createMessageContext());
+    }
+
+    private void inject(SequenceMediator main, MessageContext context) {
         context.setProperty(ServiceBusConstants.AUTOMATION_MODE_MAIN_SEQ_PROPERTY, main.getName());
         controller.inject(context, main);
     }
 
     private void resume() throws AxisFault {
+        resume(null);
+    }
+
+    private void resume(Pipe responsePipe) throws AxisFault {
         ServerContextInformation server = new ServerContextInformation(new ServerConfigurationInformation());
         SynapseCallbackReceiver receiver = new SynapseCallbackReceiver(configuration, server);
         Axis2MessageContext request = (Axis2MessageContext) pendingCall;
         Axis2MessageContext response = (Axis2MessageContext) environment.createMessageContext();
+        if (responsePipe != null) {
+            configureDeferredPayload(response, responsePipe);
+        }
         String messageId = request.getMessageID();
         AsyncCallback callback = new AsyncCallback(request.getAxis2MessageContext(), request);
         callback.setTimeout(60_000);
@@ -387,6 +441,11 @@ public class MicroIntegratorSequenceControllerTest {
         receiver.addCallback(messageId, callback);
         response.getAxis2MessageContext().addRelatesTo(new RelatesTo(messageId));
         receiver.receive(response.getAxis2MessageContext());
+    }
+
+    private void configureDeferredPayload(Axis2MessageContext context, Pipe pipe) {
+        context.getAxis2MessageContext().setProperty(Constants.Configuration.CONTENT_TYPE, "text/xml");
+        context.getAxis2MessageContext().setProperty(PassThroughConstants.PASS_THROUGH_PIPE, pipe);
     }
 
     private SequenceMediator failingSequence() {
@@ -420,8 +479,28 @@ public class MicroIntegratorSequenceControllerTest {
     private Mediator event(String event) {
         return new AbstractMediator() {
             @Override
+            public boolean isContentAware() {
+                return false;
+            }
+
+            @Override
             public boolean mediate(MessageContext context) {
                 events.add(event);
+                return true;
+            }
+        };
+    }
+
+    private Mediator readPayload() {
+        return new AbstractMediator() {
+            @Override
+            public boolean isContentAware() {
+                return true;
+            }
+
+            @Override
+            public boolean mediate(MessageContext context) {
+                events.add(context.getEnvelope().getBody().getFirstElement().getText());
                 return true;
             }
         };

@@ -25,6 +25,8 @@ import org.apache.synapse.config.SynapseConfiguration;
 import org.apache.synapse.config.xml.AnonymousListMediator;
 import org.apache.synapse.config.xml.SwitchCase;
 import org.apache.synapse.core.SynapseEnvironment;
+import org.apache.synapse.mediators.AbstractMediator;
+import org.apache.synapse.mediators.FlowContinuableMediator;
 import org.apache.synapse.mediators.Value;
 import org.apache.synapse.mediators.ListMediator;
 import org.apache.synapse.mediators.MediatorProperty;
@@ -99,13 +101,11 @@ public class MicroIntegratorSequenceController {
 
         private final String statisticsName;
         private final boolean terminal;
-        private final boolean contentAware;
 
         AutomationSequence(String name, SequenceMediator original, MessageContext context,
                            SynapseConfiguration configuration, String runName, boolean terminal) {
             this.terminal = terminal;
             statisticsName = original.getSequenceNameForStatistics();
-            contentAware = original.isContentAware();
             if (original.getName() != null) {
                 if (terminal) {
                     faultSequences.put(original.getName(), name);
@@ -159,7 +159,6 @@ public class MicroIntegratorSequenceController {
 
         @Override
         public boolean mediate(MessageContext context) {
-            buildMessage(context);
             boolean result = super.mediate(context);
             if (terminal) {
                 complete(context, result);
@@ -169,7 +168,6 @@ public class MicroIntegratorSequenceController {
 
         @Override
         public boolean mediate(MessageContext context, ContinuationState state) {
-            buildMessage(context);
             boolean result = super.mediate(context, state);
             if (terminal) {
                 complete(context, result);
@@ -179,6 +177,21 @@ public class MicroIntegratorSequenceController {
 
         private Mediator wrapMediator(Mediator mediator, MessageContext context,
                                       SynapseConfiguration configuration, String runName) {
+            Mediator wrapped = wrapAutomationMediator(mediator, context, configuration, runName);
+            // A sequence reference lets its target install its own fault handler before building.
+            if (wrapped instanceof SequenceMediator && ((SequenceMediator) wrapped).getKey() != null) {
+                return wrapped;
+            }
+            if (!mediator.isContentAware() && !wrapped.isContentAware()) {
+                return wrapped;
+            }
+            // Keep one child per original position so Synapse can resume nested continuations.
+            return wrapped instanceof FlowContinuableMediator
+                    ? new ContentAwareFlowMediator(wrapped) : new ContentAwareMediator(wrapped);
+        }
+
+        private Mediator wrapAutomationMediator(Mediator mediator, MessageContext context,
+                                                SynapseConfiguration configuration, String runName) {
             if (mediator instanceof SequenceMediator) {
                 SequenceMediator sequenceReference = (SequenceMediator) mediator;
                 Value key = sequenceReference.getKey();
@@ -353,26 +366,68 @@ public class MicroIntegratorSequenceController {
             copy.configure(original.getAspectConfiguration());
             return copy;
         }
+    }
 
+    private static class ContentAwareMediator extends AbstractMediator {
 
-        private void buildMessage(MessageContext context) {
-            if (!contentAware || Boolean.TRUE.equals(context.getProperty("message.builder.invoked"))) {
-                return;
+        private final Mediator delegate;
+
+        ContentAwareMediator(Mediator delegate) {
+            this.delegate = delegate;
+            if (delegate instanceof AbstractMediator) {
+                setMediatorId(((AbstractMediator) delegate).getMediatorId());
             }
-            if (context instanceof Axis2MessageContext) {
-                try {
-                    context.setProperty("message.builder.invoked", Boolean.TRUE);
+        }
+
+        @Override
+        public boolean mediate(MessageContext context) {
+            buildMessage(context);
+            return delegate.mediate(context);
+        }
+
+        @Override
+        public String getType() {
+            return delegate.getType();
+        }
+
+        @Override
+        public Integer reportOpenStatistics(MessageContext context, boolean continuation) {
+            return delegate.reportOpenStatistics(context, continuation);
+        }
+
+        @Override
+        public void reportCloseStatistics(MessageContext context, Integer statisticId) {
+            delegate.reportCloseStatistics(context, statisticId);
+        }
+
+        final void buildMessage(MessageContext context) {
+            try {
+                if (context instanceof Axis2MessageContext) {
+                    // RelayUtils checks the current Axis2 message, which may differ from the original request.
                     RelayUtils.buildMessage(((Axis2MessageContext) context).getAxis2MessageContext(), false);
-                } catch (Exception e) {
-                    throw new SynapseException("Error while building automation sequence message",
-                            e);
-                }
-            } else {
-                if (context.getEnvelope() != null) {
+                } else if (context.getEnvelope() != null) {
                     context.getEnvelope().getBody().build();
-                    context.setProperty("message.builder.invoked", Boolean.TRUE);
                 }
+            } catch (Exception e) {
+                throw new SynapseException("Error while building automation sequence message", e);
             }
+        }
+    }
+
+    private static final class ContentAwareFlowMediator extends ContentAwareMediator
+            implements FlowContinuableMediator {
+
+        private final FlowContinuableMediator flow;
+
+        ContentAwareFlowMediator(Mediator delegate) {
+            super(delegate);
+            flow = (FlowContinuableMediator) delegate;
+        }
+
+        @Override
+        public boolean mediate(MessageContext context, ContinuationState state) {
+            buildMessage(context);
+            return flow.mediate(context, state);
         }
     }
 
