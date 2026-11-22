@@ -27,14 +27,17 @@ import org.apache.synapse.config.xml.SwitchCase;
 import org.apache.synapse.core.SynapseEnvironment;
 import org.apache.synapse.mediators.Value;
 import org.apache.synapse.mediators.ListMediator;
+import org.apache.synapse.mediators.MediatorProperty;
 import org.apache.synapse.mediators.filters.FilterMediator;
 import org.apache.synapse.mediators.filters.SwitchMediator;
 import org.apache.synapse.mediators.builtin.ForEachMediator;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.mediators.builtin.DropMediator;
+import org.apache.synapse.mediators.builtin.ValidateMediator;
 import org.apache.synapse.SynapseException;
 import org.apache.synapse.transport.passthru.util.RelayUtils;
 import org.apache.synapse.core.axis2.Axis2MessageContext;
+import org.xml.sax.SAXException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -212,6 +215,9 @@ public class MicroIntegratorSequenceController {
             if (mediator instanceof SwitchMediator) {
                 return copySwitch((SwitchMediator) mediator, context, configuration, runName);
             }
+            if (mediator instanceof ValidateMediator) {
+                return copyValidate((ValidateMediator) mediator, context, configuration, runName);
+            }
             return mediator;
         }
 
@@ -275,6 +281,33 @@ public class MicroIntegratorSequenceController {
             SwitchCase copy = new SwitchCase();
             copy.setRegex(original.getRegex());
             copy.setCaseMediator(branch);
+            return copy;
+        }
+
+
+        private ValidateMediator copyValidate(ValidateMediator original, MessageContext context,
+                                              SynapseConfiguration configuration, String runName) {
+            ValidateMediator copy = new ValidateMediator();
+            copy.setSchemaKeys(original.getSchemaKeys());
+            if (original.getSource() != null) {
+                copy.setSource(original.getSource());
+            }
+            copy.setIsJSONSource(original.isJSONSource());
+            copy.setResourceMap(original.getResourceMap());
+            copy.setCacheSchema(original.isCacheSchema());
+            copy.setTraceState(original.getTraceState());
+            copy.setMediatorPosition(original.getMediatorPosition());
+            copy.configure(original.getAspectConfiguration());
+            for (MediatorProperty feature : original.getFeatures()) {
+                try {
+                    copy.addFeature(feature.getName(), Boolean.parseBoolean(feature.getValue()));
+                } catch (SAXException e) {
+                    throw new SynapseException("Could not copy validation feature " + feature.getName(), e);
+                }
+            }
+            for (Mediator child : original.getList()) {
+                copy.addChild(wrapMediator(child, context, configuration, runName));
+            }
             return copy;
         }
 

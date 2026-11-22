@@ -18,6 +18,7 @@
 
 package org.wso2.micro.integrator.initializer;
 
+import org.apache.axiom.om.util.AXIOMUtil;
 import org.apache.axis2.AxisFault;
 import org.apache.axis2.addressing.RelatesTo;
 import org.apache.axis2.context.ConfigurationContext;
@@ -28,6 +29,7 @@ import org.apache.synapse.ServerConfigurationInformation;
 import org.apache.synapse.ServerContextInformation;
 import org.apache.synapse.SynapseConstants;
 import org.apache.synapse.SynapseException;
+import org.apache.synapse.config.Entry;
 import org.apache.synapse.config.SynapseConfiguration;
 import org.apache.synapse.config.xml.AnonymousListMediator;
 import org.apache.synapse.config.xml.SwitchCase;
@@ -41,6 +43,8 @@ import org.apache.synapse.mediators.Value;
 import org.apache.synapse.mediators.base.SequenceMediator;
 import org.apache.synapse.mediators.builtin.CallMediator;
 import org.apache.synapse.mediators.builtin.DropMediator;
+import org.apache.synapse.mediators.builtin.ForEachMediator;
+import org.apache.synapse.mediators.builtin.ValidateMediator;
 import org.apache.synapse.mediators.filters.FilterMediator;
 import org.apache.synapse.mediators.filters.SwitchMediator;
 import org.apache.synapse.util.xpath.SynapseXPath;
@@ -286,6 +290,82 @@ public class MicroIntegratorSequenceControllerTest {
         Arrays.stream(children).forEach(list::addChild);
         branch.setCaseMediator(list);
         return branch;
+    }
+
+
+    @Test
+    public void shutsDownAfterDropInValidateOnFail() throws Exception {
+        injectInvalidPayload(event("validate on-fail"), new DropMediator());
+        assertEvents("validate on-fail", "shutdown");
+    }
+
+    @Test
+    public void waitsForReferencedFaultInValidateOnFail() throws Exception {
+        sequence("validate-fault", event("fault started"), nonBlockingCall(), event("fault finished"));
+        SequenceMediator child = sequence("validate-child", failure());
+        child.setErrorHandler("validate-fault");
+        SequenceMediator reference = new SequenceMediator();
+        reference.setKey(new Value("validate-child"));
+
+        injectInvalidPayload(event("validate on-fail"), reference);
+        assertEvents("validate on-fail", "fault started", "call");
+        resume();
+        assertEvents("validate on-fail", "fault started", "call", "fault finished", "shutdown");
+    }
+
+    @Test
+    public void shutsDownAfterFaultInExpressionSelectedSequence() throws Exception {
+        sequence("dynamic-fault", event("dynamic fault finished"));
+        SequenceMediator child = sequence("dynamic-child", event("dynamic child entered"), failure());
+        child.setErrorHandler("dynamic-fault");
+        SequenceMediator reference = new SequenceMediator();
+        reference.setKey(new Value(new SynapseXPath("get-property('childSequence')")));
+        SequenceMediator main = sequence("main", reference, event("after dynamic child"));
+
+        MessageContext context = environment.createMessageContext();
+        context.setProperty("childSequence", child.getName());
+        context.setProperty(ServiceBusConstants.AUTOMATION_MODE_MAIN_SEQ_PROPERTY, main.getName());
+        controller.inject(context, main);
+
+        assertEvents("dynamic child entered", "dynamic fault finished", "shutdown");
+    }
+
+    @Test
+    public void continuesAfterDropConsumedByForEach() throws Exception {
+        SequenceMediator iteration = sequence("iteration", event("iteration before drop"), new DropMediator(),
+                event("iteration after drop"));
+        ForEachMediator forEach = new ForEachMediator();
+        forEach.setExpression(new SynapseXPath("//items/item"));
+        forEach.setSequenceRef(iteration.getName());
+        SequenceMediator main = sequence("main", forEach, event("after foreach"));
+
+        MessageContext context = environment.createMessageContext();
+        context.getEnvelope().getBody().addChild(AXIOMUtil.stringToOM("<items><item>one</item></items>"));
+        context.setProperty(ServiceBusConstants.AUTOMATION_MODE_MAIN_SEQ_PROPERTY, main.getName());
+        controller.inject(context, main);
+
+        assertEvents("iteration before drop", "after foreach", "shutdown");
+    }
+
+
+    private void injectInvalidPayload(Mediator... onFail) throws Exception {
+        String schemaKey = "validate-schema";
+        Entry schema = new Entry(schemaKey);
+        schema.setType(Entry.INLINE_XML);
+        schema.setValue(AXIOMUtil.stringToOM(
+                "<xs:schema xmlns:xs='http://www.w3.org/2001/XMLSchema'>"
+                        + "<xs:element name='valid' type='xs:string'/>"
+                        + "</xs:schema>"));
+        configuration.addEntry(schemaKey, schema);
+
+        ValidateMediator validate = new ValidateMediator();
+        validate.setSchemaKeys(Arrays.asList(new Value(schemaKey)));
+        Arrays.stream(onFail).forEach(validate::addChild);
+        SequenceMediator main = sequence("main", validate, event("after validate"));
+        MessageContext context = environment.createMessageContext();
+        context.getEnvelope().getBody().addChild(AXIOMUtil.stringToOM("<invalid/>"));
+        context.setProperty(ServiceBusConstants.AUTOMATION_MODE_MAIN_SEQ_PROPERTY, main.getName());
+        controller.inject(context, main);
     }
 
 

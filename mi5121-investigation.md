@@ -137,3 +137,11 @@ All 15 tests in `MicroIntegratorSequenceControllerTest` passed with zero failure
 `F9C47A212EF485F4201433A7131FA9DE8254D7AFA3516B47E1C7EA808A58DC7B`
 
 These results cover the mediator paths exercised by the fixtures.
+
+## Validate on-fail and regression coverage
+
+The first focused run reproduced two failures in Validate's on-fail branch. A terminal drop never triggered shutdown, and a referenced sequence's asynchronous fault handler finished without triggering shutdown. I added a private Validate mediator for the automation invocation and wrapped its on-fail children, preserving the schema and validation settings.
+
+I verified that a terminal drop in on-fail triggers shutdown and that a referenced fault handler's nonblocking call resumes and finishes before shutdown. I also added tests for an expression-selected sequence that runs its own fault handler and for a ForEach iteration that consumes a drop and returns control to the enclosing sequence.
+
+The clean Maven run on Windows reported 19 tests, zero failures, zero errors, zero skips, and BUILD SUCCESS. The packaged-runtime checks above used the earlier build.
