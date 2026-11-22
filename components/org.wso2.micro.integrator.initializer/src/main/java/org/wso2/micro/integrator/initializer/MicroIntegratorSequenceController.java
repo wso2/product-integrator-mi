@@ -426,7 +426,6 @@ public class MicroIntegratorSequenceController {
 
         @Override
         public boolean mediate(MessageContext context, ContinuationState state) {
-            buildMessage(context);
             return flow.mediate(context, state);
         }
     }

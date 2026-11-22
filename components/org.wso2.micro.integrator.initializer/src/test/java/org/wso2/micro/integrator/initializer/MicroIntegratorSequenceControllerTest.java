@@ -65,6 +65,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Exercises automation sequence completion using Synapse mediation with an in-memory call endpoint.
@@ -129,6 +130,44 @@ public class MicroIntegratorSequenceControllerTest {
 
         assertEvents("call", "backend response", "shutdown");
     }
+
+    @Test
+    public void resumesFilterWithoutReadingUnusedResponseBody() throws Exception {
+        FilterMediator filter = new FilterMediator();
+        filter.setXpath(new SynapseXPath("boolean(//run)"));
+        assertTrue(filter.isContentAware());
+        filter.addChild(nonBlockingCall());
+        filter.addChild(new AbstractMediator() {
+            @Override
+            public boolean isContentAware() {
+                return false;
+            }
+
+            @Override
+            public boolean mediate(MessageContext context) {
+                Axis2MessageContext response = (Axis2MessageContext) context;
+                events.add("HTTP " + response.getAxis2MessageContext().getProperty("HTTP_SC"));
+                return true;
+            }
+        });
+        SequenceMediator main = sequence("main", filter, event("after filter"));
+        MessageContext request = environment.createMessageContext();
+        request.getEnvelope().getBody().addChild(AXIOMUtil.stringToOM("<run/>"));
+
+        inject(main, request);
+        assertEvents("call");
+
+        resume(new Pipe(null, "automation test response", null) {
+            @Override
+            public synchronized InputStream getInputStream() {
+                events.add("response body opened");
+                return new ByteArrayInputStream("not XML".getBytes(StandardCharsets.UTF_8));
+            }
+        });
+
+        assertEvents("call", "HTTP 200", "after filter", "shutdown");
+    }
+
 
     @Test
     public void routesMessageBuildFailureToSequenceErrorHandler() {
@@ -433,6 +472,7 @@ public class MicroIntegratorSequenceControllerTest {
         Axis2MessageContext response = (Axis2MessageContext) environment.createMessageContext();
         if (responsePipe != null) {
             configureDeferredPayload(response, responsePipe);
+            response.getAxis2MessageContext().setProperty("HTTP_SC", 200);
         }
         String messageId = request.getMessageID();
         AsyncCallback callback = new AsyncCallback(request.getAxis2MessageContext(), request);
