@@ -171,7 +171,9 @@ public class AppDeployerServiceComponent {
         cappDeployer.init(configCtx);
 
         // Register application deployment handlers
-        cappDeployer.registerDeploymentHandler(new ConfigDeployer());
+        ConfigDeployer configDeployer = new ConfigDeployer();
+        configDeployer.loadUnitTestConfig();
+        cappDeployer.registerDeploymentHandler(configDeployer);
         cappDeployer.registerDeploymentHandler(new FileRegistryResourceDeployer(
                 synapseEnvironmentService.getSynapseEnvironment().getSynapseConfiguration().getRegistry()));
         cappDeployer.registerDeploymentHandler(new DataSourceCappDeployer());
