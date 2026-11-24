@@ -27,6 +27,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.wso2.carbon.connector.core.ConnectionHealthRegistry;
 
+import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.util.AbstractMap;
@@ -110,6 +111,42 @@ public class ConnectorResourceHealthTest {
         Assert.assertFalse(entry.has("connections"));
         Assert.assertEquals(CONNECTOR, entry.getString("name"));
         Assert.assertFalse(singleEntry().has("connections"));
+    }
+
+    @Test
+    public void testListWithoutTheRegistryGivesTheConnectorWithNoList() throws Exception {
+        String registry = ConnectionHealthRegistry.class.getName();
+        String resource = ConnectorResource.class.getName();
+        byte[] code;
+        try (InputStream in = ConnectorResource.class.getResourceAsStream("ConnectorResource.class")) {
+            code = in.readAllBytes();
+        }
+        // The resource class again, in a loader that finds no registry class, as on a server without the package.
+        ClassLoader loader = new ClassLoader(getClass().getClassLoader()) {
+            @Override
+            protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+                if (registry.equals(name)) {
+                    throw new ClassNotFoundException(name);
+                }
+                if (!resource.equals(name)) {
+                    return super.loadClass(name, resolve);
+                }
+                synchronized (getClassLoadingLock(name)) {
+                    Class<?> loaded = findLoadedClass(name);
+                    return loaded != null ? loaded : defineClass(name, code, 0, code.length);
+                }
+            }
+        };
+        Class<?> type = loader.loadClass(resource);
+        Method add = type.getDeclaredMethod("addToJsonList", JSONArray.class, SynapseLibrary.class);
+        add.setAccessible(true);
+        JSONArray list = new JSONArray();
+        add.invoke(type.getDeclaredConstructor().newInstance(), list, library(STANDARD_PACKAGE));
+
+        JSONObject entry = list.getJSONObject(0);
+        Assert.assertEquals(CONNECTOR, entry.getString("name"));
+        Assert.assertEquals("enabled", entry.getString("status"));
+        Assert.assertFalse(entry.has("connections"));
     }
 
     @Test

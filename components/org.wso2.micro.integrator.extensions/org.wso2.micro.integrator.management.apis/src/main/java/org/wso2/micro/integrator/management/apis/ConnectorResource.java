@@ -223,8 +223,14 @@ public class ConnectorResource implements MiApiResource {
      */
     private void addConnections(JSONObject connectorObject, SynapseLibrary library) {
         String connector = "{" + library.getQName().getNamespaceURI() + "}" + library.getName();
-        Map<String, Supplier<Map<String, Object>>> healthByName =
-                new TreeMap<>(ConnectionHealthRegistry.getConnections(connector));
+        Map<String, Supplier<Map<String, Object>>> healthByName;
+        try {
+            healthByName = new TreeMap<>(ConnectionHealthRegistry.getConnections(connector));
+        } catch (LinkageError e) {
+            // The import of the registry package is optional. Without the registry the entry has no list.
+            LOG.debug("No connection health registry for the connector " + connector, e);
+            return;
+        }
         if (healthByName.isEmpty()) {
             return;
         }
