@@ -97,6 +97,21 @@ public class ConfigDeployer implements AppDeploymentHandler {
         });
     }
 
+    /**
+     * Register the declarations for a dedicated Synapse unit-test server.
+     */
+    public void loadUnitTestConfig() {
+        if (!Boolean.getBoolean("synapseTest")) {
+            return;
+        }
+
+        String configFilePath = System.getProperty("synapseTestConfigFile");
+        if (StringUtils.isNotBlank(configFilePath)) {
+            Path serverPropertiesFile = Paths.get(getHome(), "conf", FILE_PROPERTIES_NAME);
+            processConfFile("Synapse unit tests", configFilePath, serverPropertiesFile.toString());
+        }
+    }
+
     private void writePropertyToMap(Artifact artifact) {
         // get the file path of the registry config file
         List<CappFile> files = artifact.getFiles();
