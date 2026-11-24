@@ -23,6 +23,7 @@ import io.prometheus.metrics.core.metrics.Gauge;
 import io.prometheus.metrics.core.metrics.Histogram;
 import io.prometheus.metrics.model.registry.Collector;
 import io.prometheus.metrics.model.registry.PrometheusRegistry;
+import io.prometheus.metrics.model.snapshots.CounterSnapshot;
 import io.prometheus.metrics.model.snapshots.GaugeSnapshot;
 import io.prometheus.metrics.model.snapshots.Label;
 import org.junit.After;
@@ -397,6 +398,44 @@ public class PrometheusReporterV1ComponentMetricTest {
     }
 
     // The value of each series of a metric, by its label values. A series that is collected twice fails.
+    // A counter series exists at 0 before its first event, and an existing series keeps its value.
+    @Test
+    public void testCounterSeriesStartsAtZero() throws Exception {
+        String counter = "pd_v1_failures_total";
+        String gauge = "pd_v1_fail_states_pending";
+        List<String> series = Arrays.asList("INBOUND", "a");
+        Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, counter, "Failures", LABELS));
+        Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, gauge, "Pending", LABELS));
+        Assert.assertTrue("No series before the first event", counterSamples(reporter, counter).isEmpty());
+
+        Assert.assertTrue(reporter.initCounter(counter, new String[]{"INBOUND", "a"}));
+        Assert.assertEquals(Collections.singletonMap(series, 0.0), counterSamples(reporter, counter));
+
+        reporter.incrementCount(counter, new String[]{"INBOUND", "a"});
+        Assert.assertTrue(reporter.initCounter(counter, new String[]{"INBOUND", "a"}));
+        Assert.assertEquals(Collections.singletonMap(series, 1.0), counterSamples(reporter, counter));
+
+        Assert.assertFalse("A gauge is not a counter", reporter.initCounter(gauge, new String[]{"INBOUND", "a"}));
+        Assert.assertFalse("Too few label values", reporter.initCounter(counter, new String[]{"INBOUND"}));
+        Assert.assertFalse("No label values", reporter.initCounter(counter, null));
+        Assert.assertFalse("A name that is not registered", reporter.initCounter("pd_v1_unknown", LABELS));
+        Assert.assertEquals(Collections.singletonMap(series, 1.0), counterSamples(reporter, counter));
+    }
+
+    private static Map<List<String>, Double> counterSamples(PrometheusReporterV1 reporter, String name)
+            throws Exception {
+        Map<List<String>, Double> samples = new HashMap<>();
+        Counter counter = (Counter) metricMap(reporter).get(name);
+        for (CounterSnapshot.CounterDataPointSnapshot point : counter.collect().getDataPoints()) {
+            List<String> values = new ArrayList<>();
+            for (Label label : point.getLabels()) {
+                values.add(label.getValue());
+            }
+            Assert.assertNull("Each series is collected once", samples.put(values, point.getValue()));
+        }
+        return samples;
+    }
+
     private static Map<List<String>, Double> samples(PrometheusReporterV1 reporter, String name) throws Exception {
         Map<List<String>, Double> samples = new HashMap<>();
         Gauge gauge = (Gauge) metricMap(reporter).get(name);

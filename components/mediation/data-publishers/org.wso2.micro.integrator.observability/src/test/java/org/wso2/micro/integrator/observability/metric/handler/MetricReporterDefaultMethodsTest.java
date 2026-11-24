@@ -101,6 +101,7 @@ public class MetricReporterDefaultMethodsTest {
         Assert.assertFalse(reporter.createComponentMetric(MetricConstants.GAUGE, "pd_custom_open_sessions",
                 "Open sessions", new String[]{"kind", "name"}));
         Assert.assertFalse(reporter.setGauge("pd_custom_open_sessions", new String[]{"CONNECTION", "c1"}, 1));
+        Assert.assertFalse(reporter.initCounter("pd_custom_files_total", new String[]{"CONNECTION", "c1"}));
         Assert.assertEquals("The defaults call nothing on the reporter", 0, type.getField("calls").getInt(reporter));
     }
 

@@ -370,6 +370,17 @@ public class PrometheusReporterV1 implements MetricReporter {
         return true;
     }
 
+    @Override
+    public synchronized boolean initCounter(String metricName, String[] labelValues) {
+        if (!MetricConstants.COUNTER.equals(componentTypes.get(metricName)) || labelValues == null
+                || labelValues.length != componentLabels.get(metricName).length) {
+            return false;
+        }
+        // Asking for the series makes it with the value 0. A series that exists keeps its value.
+        ((Counter) metricMap.get(metricName)).labelValues(labelValues.clone());
+        return true;
+    }
+
     /**
      * The key under which createMetrics keeps the metric of a service type.
      */

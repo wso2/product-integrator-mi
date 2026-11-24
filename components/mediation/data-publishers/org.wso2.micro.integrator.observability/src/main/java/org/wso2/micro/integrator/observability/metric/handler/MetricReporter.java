@@ -180,4 +180,20 @@ public interface MetricReporter {
     default boolean setGauge(String metricName, String[] labelValues, double value) {
         return false;
     }
+
+    /**
+     * Makes the series of a counter that createComponentMetric registered, with the value 0, so that the series
+     * exists before its first event. A series that starts at 1 hides its first event from rate and increase. A
+     * series that exists keeps its value.
+     * <p>
+     * A reporter with support also answers false, and makes nothing, for a name that is not such a counter, for
+     * a null label array, and for a number of label values that differs from the number of label names.
+     *
+     * @param metricName  Metric name
+     * @param labelValues Metric label values, one for each label name
+     * @return true when the series exists, false when it is not made
+     */
+    default boolean initCounter(String metricName, String[] labelValues) {
+        return false;
+    }
 }

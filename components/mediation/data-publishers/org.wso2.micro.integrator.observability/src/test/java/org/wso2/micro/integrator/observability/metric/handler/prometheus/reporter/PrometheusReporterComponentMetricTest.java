@@ -407,6 +407,46 @@ public class PrometheusReporterComponentMetricTest {
     }
 
     // The value of each series of a metric, by its label values. A series that is collected twice fails.
+    // A counter series exists at 0 before its first event, and an existing series keeps its value.
+    @Test
+    public void testCounterSeriesStartsAtZero() throws Exception {
+        String counter = "pd_legacy_failures_total";
+        String gauge = "pd_legacy_fail_states_pending";
+        List<String> series = Arrays.asList("INBOUND", "a");
+        Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, counter, "Failures", LABELS));
+        Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, gauge, "Pending", LABELS));
+        Assert.assertTrue("No series before the first event", counterSamples(reporter, counter).isEmpty());
+
+        Assert.assertTrue(reporter.initCounter(counter, new String[]{"INBOUND", "a"}));
+        Assert.assertEquals(Collections.singletonMap(series, 0.0), counterSamples(reporter, counter));
+
+        reporter.incrementCount(counter, new String[]{"INBOUND", "a"});
+        Assert.assertTrue(reporter.initCounter(counter, new String[]{"INBOUND", "a"}));
+        Assert.assertEquals(Collections.singletonMap(series, 1.0), counterSamples(reporter, counter));
+
+        Assert.assertFalse("A gauge is not a counter", reporter.initCounter(gauge, new String[]{"INBOUND", "a"}));
+        Assert.assertFalse("Too few label values", reporter.initCounter(counter, new String[]{"INBOUND"}));
+        Assert.assertFalse("No label values", reporter.initCounter(counter, null));
+        Assert.assertFalse("A name that is not registered", reporter.initCounter("pd_legacy_unknown", LABELS));
+        Assert.assertEquals(Collections.singletonMap(series, 1.0), counterSamples(reporter, counter));
+    }
+
+    // The value samples of a counter. The library also gives a creation time sample for each series.
+    private static Map<List<String>, Double> counterSamples(PrometheusReporter reporter, String name)
+            throws Exception {
+        Map<List<String>, Double> samples = new HashMap<>();
+        Collector collector = (Collector) metricMap(reporter).get(name);
+        for (Collector.MetricFamilySamples family : collector.collect()) {
+            for (Collector.MetricFamilySamples.Sample sample : family.samples) {
+                if (sample.name.endsWith("_total")) {
+                    Assert.assertNull("Each series is collected once",
+                            samples.put(new ArrayList<>(sample.labelValues), sample.value));
+                }
+            }
+        }
+        return samples;
+    }
+
     private static Map<List<String>, Double> samples(PrometheusReporter reporter, String name) throws Exception {
         Map<List<String>, Double> samples = new HashMap<>();
         Collector collector = (Collector) metricMap(reporter).get(name);
