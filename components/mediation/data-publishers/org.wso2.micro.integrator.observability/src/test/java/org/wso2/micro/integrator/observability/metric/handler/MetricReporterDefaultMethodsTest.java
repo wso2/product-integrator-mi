@@ -33,7 +33,7 @@ public class MetricReporterDefaultMethodsTest {
 
     private static final String PACKAGE = "org.wso2.micro.integrator.observability.metric.handler";
 
-    // The interface as it was before the two default methods.
+    // The interface as it was before the three default methods.
     private static final String OLD_INTERFACE = "package " + PACKAGE + ";\n"
             + "public interface MetricReporter {\n"
             + "    void createMetrics(String serviceType, String type, String metricName, String metricHelp,"
@@ -96,12 +96,12 @@ public class MetricReporterDefaultMethodsTest {
         Assert.assertSame(MetricReporter.class, type.getInterfaces()[0]);
         MetricReporter reporter = (MetricReporter) type.getDeclaredConstructor().newInstance();
 
-        Assert.assertFalse(reporter.createComponentMetric(MetricConstants.COUNTER, "pd_custom_files_total",
+        Assert.assertFalse(reporter.createComponentMetric(MetricConstants.COUNTER, "test_custom_files_total",
                 "Files done", new String[]{"kind", "name"}));
-        Assert.assertFalse(reporter.createComponentMetric(MetricConstants.GAUGE, "pd_custom_open_sessions",
+        Assert.assertFalse(reporter.createComponentMetric(MetricConstants.GAUGE, "test_custom_open_sessions",
                 "Open sessions", new String[]{"kind", "name"}));
-        Assert.assertFalse(reporter.setGauge("pd_custom_open_sessions", new String[]{"CONNECTION", "c1"}, 1));
-        Assert.assertFalse(reporter.initCounter("pd_custom_files_total", new String[]{"CONNECTION", "c1"}));
+        Assert.assertFalse(reporter.setGauge("test_custom_open_sessions", new String[]{"CONNECTION", "c1"}, 1));
+        Assert.assertFalse(reporter.initCounter("test_custom_files_total", new String[]{"CONNECTION", "c1"}));
         Assert.assertEquals("The defaults call nothing on the reporter", 0, type.getField("calls").getInt(reporter));
     }
 

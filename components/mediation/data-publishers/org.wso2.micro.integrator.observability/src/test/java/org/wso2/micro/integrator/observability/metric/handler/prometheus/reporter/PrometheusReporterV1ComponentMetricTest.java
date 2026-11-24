@@ -79,11 +79,11 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testDuplicateLabelNamesFailBeforeRegistration() throws Exception {
-        String healthy = "pd_v1_healthy";
+        String healthy = "test_v1_healthy";
         Assert.assertTrue(reporter.createComponentMetric("Gauge", healthy, "Healthy", LABELS));
         Assert.assertTrue(reporter.setGauge(healthy, new String[]{"INBOUND", "first"}, 7));
         for (String type : new String[]{"Counter", "Gauge"}) {
-            String name = "pd_v1_labels_" + type.toLowerCase(Locale.ROOT);
+            String name = "test_v1_labels_" + type.toLowerCase(Locale.ROOT);
             for (String first : new String[]{"file_id", "file.id"}) {
                 try {
                     reporter.createComponentMetric(type, name, "Files", new String[]{first, "file_id"});
@@ -101,7 +101,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testCounterIsRegisteredOnceAndUsedAgain() throws Exception {
-        String name = "pd_v1_files_total";
+        String name = "test_v1_files_total";
 
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Files done", LABELS));
         Object counter = metricMap(reporter).get(name);
@@ -116,7 +116,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testOtherShapeGivesFalse() throws Exception {
-        String name = "pd_v1_failures_total";
+        String name = "test_v1_failures_total";
 
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Failures", LABELS));
         Object counter = metricMap(reporter).get(name);
@@ -132,7 +132,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testRefusedShapeIsLoggedOnce() throws Exception {
-        String name = "pd_v1_clash_total";
+        String name = "test_v1_clash_total";
         List<String> errors = new ArrayList<>();
         Handler handler = new Handler() {
             @Override
@@ -171,8 +171,8 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testGaugeIsSet() throws Exception {
-        String gauge = "pd_v1_open_sessions";
-        String counter = "pd_v1_transport_faults_total";
+        String gauge = "test_v1_open_sessions";
+        String counter = "test_v1_transport_faults_total";
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, gauge, "Open sessions", LABELS));
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, counter, "Faults", LABELS));
 
@@ -182,13 +182,13 @@ public class PrometheusReporterV1ComponentMetricTest {
         Assert.assertFalse("Too few label values", reporter.setGauge(gauge, new String[]{"CONNECTION"}, 8));
         Assert.assertFalse("No label values", reporter.setGauge(gauge, null, 8));
         Assert.assertFalse("A counter is not a gauge", reporter.setGauge(counter, new String[]{"CONNECTION", "c1"}, 8));
-        Assert.assertFalse("A name that is not registered", reporter.setGauge("pd_v1_unknown", LABELS, 8));
+        Assert.assertFalse("A name that is not registered", reporter.setGauge("test_v1_unknown", LABELS, 8));
         Assert.assertEquals(7.0, ((Gauge) metricMap(reporter).get(gauge)).labelValues("CONNECTION", "c1").get(), 0.0);
     }
 
     @Test
     public void testOtherTypeIsNotRegistered() throws Exception {
-        String name = "pd_v1_latency_seconds";
+        String name = "test_v1_latency_seconds";
 
         Assert.assertFalse(reporter.createComponentMetric(MetricConstants.HISTOGRAM, name, "Latency", LABELS));
         Assert.assertFalse(metricMap(reporter).containsKey(name));
@@ -201,7 +201,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testLabelNamesAreCopied() throws Exception {
-        String name = "pd_v1_owned_names";
+        String name = "test_v1_owned_names";
         String[] names = {"owner"};
 
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, name, "Owned names", names));
@@ -216,7 +216,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testLabelValuesAreCopied() throws Exception {
-        String name = "pd_v1_owned_values";
+        String name = "test_v1_owned_values";
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, name, "Owned values",
                 new String[]{"owner"}));
 
@@ -233,7 +233,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testRefusedShapeIsCopied() throws Exception {
-        String name = "pd_v1_owned_shape_total";
+        String name = "test_v1_owned_shape_total";
         try (Errors errors = new Errors(name)) {
             Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, name, "Owned shape", LABELS));
             String[] other = {"other"};
@@ -252,7 +252,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testComponentMetricDoesNotTakeTheKeyOfAServerMetric() throws Exception {
-        String key = "pd_v1_timer_lookup";
+        String key = "test_v1_timer_lookup";
         try (Errors errors = new Errors(key)) {
             reporter.createMetrics("PROXY", MetricConstants.HISTOGRAM, key, "Latency", SERVICE_LABELS);
             Object histogram = metricMap(reporter).get(key);
@@ -274,7 +274,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testServerMetricDoesNotTakeTheKeyOfAComponentMetric() throws Exception {
-        String key = "pd_v1_gauge_lookup";
+        String key = "test_v1_gauge_lookup";
         try (Errors errors = new Errors(key)) {
             Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, key, "Open sessions", LABELS));
             Assert.assertTrue(reporter.setGauge(key, new String[]{"CONNECTION", "c1"}, 7));
@@ -291,7 +291,7 @@ public class PrometheusReporterV1ComponentMetricTest {
         }
 
         // The refused call registered nothing, so the metric of the server can still be registered.
-        String free = "pd_v1_api_timer_lookup";
+        String free = "test_v1_api_timer_lookup";
         reporter.createMetrics("API", MetricConstants.HISTOGRAM, free, "Latency", API_LABELS);
         Object timer = reporter.getTimer(free, new String[]{"api", "api", "/context"});
         Assert.assertNotNull(timer);
@@ -300,7 +300,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testErrorMetricAndComponentMetricKeepTheirKeys() throws Exception {
-        String key = "pd_v1_component_first_total";
+        String key = "test_v1_component_first_total";
         try (Errors errors = new Errors(key)) {
             Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, key, "Files", LABELS));
             Object counter = metricMap(reporter).get(key);
@@ -313,7 +313,7 @@ public class PrometheusReporterV1ComponentMetricTest {
         }
 
         // The refused call registered nothing, so the error metric of the server can still be registered.
-        String serverKey = "pd_v1_error_lookup";
+        String serverKey = "test_v1_error_lookup";
         try (Errors errors = new Errors(serverKey)) {
             reporter.initErrorMetrics("PROXY", MetricConstants.COUNTER, serverKey, "Errors", SERVICE_LABELS);
             Object errorCounter = metricMap(reporter).get(serverKey);
@@ -330,7 +330,7 @@ public class PrometheusReporterV1ComponentMetricTest {
 
     @Test
     public void testComponentRegistrationWaitsForAServerRegistration() throws Exception {
-        String key = "pd_v1_held_lookup";
+        String key = "test_v1_held_lookup";
         HeldConfigs configs = new HeldConfigs();
         setStatic(ConfigParser.class, "parsedConfigs", configs);
         AtomicReference<Boolean> registered = new AtomicReference<>();
@@ -401,8 +401,8 @@ public class PrometheusReporterV1ComponentMetricTest {
     // A counter series exists at 0 before its first event, and an existing series keeps its value.
     @Test
     public void testCounterSeriesStartsAtZero() throws Exception {
-        String counter = "pd_v1_failures_total";
-        String gauge = "pd_v1_fail_states_pending";
+        String counter = "test_v1_failures_total";
+        String gauge = "test_v1_fail_states_pending";
         List<String> series = Arrays.asList("INBOUND", "a");
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.COUNTER, counter, "Failures", LABELS));
         Assert.assertTrue(reporter.createComponentMetric(MetricConstants.GAUGE, gauge, "Pending", LABELS));
@@ -418,7 +418,7 @@ public class PrometheusReporterV1ComponentMetricTest {
         Assert.assertFalse("A gauge is not a counter", reporter.initCounter(gauge, new String[]{"INBOUND", "a"}));
         Assert.assertFalse("Too few label values", reporter.initCounter(counter, new String[]{"INBOUND"}));
         Assert.assertFalse("No label values", reporter.initCounter(counter, null));
-        Assert.assertFalse("A name that is not registered", reporter.initCounter("pd_v1_unknown", LABELS));
+        Assert.assertFalse("A name that is not registered", reporter.initCounter("test_v1_unknown", LABELS));
         Assert.assertEquals(Collections.singletonMap(series, 1.0), counterSamples(reporter, counter));
     }
 
