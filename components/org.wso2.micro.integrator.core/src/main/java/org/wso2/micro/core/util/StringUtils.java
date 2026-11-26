@@ -352,9 +352,8 @@ public class StringUtils {
             return;
         }
         int length = str.length();
-        char character;
-        for (int i = 0; i < length; i++) {
-            character = str.charAt(i);
+        for (int i = 0; i < length;) {
+            int character = str.codePointAt(i);
             if (character > 0x7F) {
                 out.write("&#x");
                 out.write(Integer.toHexString(character).toUpperCase());
@@ -362,6 +361,7 @@ public class StringUtils {
             } else {
                 out.write(character);
             }
+            i += Character.charCount(character);
         }
     }
 
@@ -605,6 +605,8 @@ public class StringUtils {
      * character references looks like "&#x3088;&#x3046;&#x3053;&#x305d;".</p>
      * <p/>
      * <p>A <code>null</code> string input has no effect.</p>
+     * <p>Hexadecimal references may contain any number of digits. Malformed references and
+     * references outside the Unicode scalar range are left unchanged.</p>
      *
      * @param out the <code>Writer</code> used to output unescaped characters
      * @param str the <code>String</code> to unescape, may be null
@@ -620,53 +622,33 @@ public class StringUtils {
         }
 
         int sz = str.length();
-        StringBuffer unicode = new StringBuffer(4);
-        StringBuffer escapes = new StringBuffer(3);
-        boolean inUnicode = false;
-
         for (int i = 0; i < sz; i++) {
-            char ch = str.charAt(i);
-            if (inUnicode) {
-                // if in unicode, then we're reading unicode
-                // values in somehow
-                unicode.append(ch);
-                if (unicode.length() == 4) {
-                    // unicode now contains the four hex digits
-                    // which represents our unicode character
-                    try {
-                        int value = Integer.parseInt(unicode.toString(), 16);
-                        out.write((char) value);
-                        unicode.setLength(0);
-                        // need to skip the delimiter - ';'
-                        i = i + 1;
-                        inUnicode = false;
-                    } catch (NumberFormatException nfe) {
-                        throw nfe;
-                    }
-                }
-                continue;
-            } else if (ch == '&') {
-                // Start of the escape sequence ...
-                // At least, the numeric character references require 8 bytes to
-                // describe a Unicode character like as"&#xFFFF;"
-                if (i + 7 <= sz) {
-                    escapes.append(ch);
-                    escapes.append(str.charAt(i + 1));
-                    escapes.append(str.charAt(i + 2));
-                    if (escapes.toString().equals("&#x") && str.charAt(i + 7) == ';') {
-                        inUnicode = true;
+            if (str.startsWith("&#x", i)) {
+                int end = i + 3;
+                while (end < sz) {
+                    char digit = str.charAt(end);
+                    if ((digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f') ||
+                            (digit >= 'A' && digit <= 'F')) {
+                        end++;
                     } else {
-                        out.write(escapes.toString());
+                        break;
                     }
-                    escapes.setLength(0);
-                    // need to skip the escaping chars - '&#x'
-                    i = i + 2;
-                } else {
-                    out.write(ch);
                 }
-                continue;
+                if (end > i + 3 && end < sz && str.charAt(end) == ';') {
+                    try {
+                        int value = Integer.parseInt(str.substring(i + 3, end), 16);
+                        if (Character.isValidCodePoint(value) &&
+                                (value < Character.MIN_SURROGATE || value > Character.MAX_SURROGATE)) {
+                            out.write(Character.toChars(value));
+                            i = end;
+                            continue;
+                        }
+                    } catch (NumberFormatException nfe) {
+                        // Preserve references whose value cannot fit in a Unicode code point.
+                    }
+                }
             }
-            out.write(ch);
+            out.write(str.charAt(i));
         }
     }
 }
