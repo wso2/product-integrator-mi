@@ -302,7 +302,10 @@ public class SynapseAppDeployer implements AppDeploymentHandler {
                         deployer.undeploy(artifactPath);
                     } else if (SynapseAppDeployerConstants.SYNAPSE_LIBRARY_TYPE.equals(artifact.getType())){
                         String libQName = getArtifactName(artifactPath, axisConfig);
-                        deleteImport(libQName, axisConfig);
+                        // The import of a library goes with its last user, another application may still use it.
+                        if (libQName == null || SynapseConfiguration.getDeployedLibCount(libQName) <= 1) {
+                            deleteImport(libQName, axisConfig);
+                        }
                         deployer.undeploy(artifactPath);
                     } else if (SynapseAppDeployerConstants.SEQUENCE_TYPE.equals(artifact.getType())
                                && handleMainFaultSeqUndeployment(artifact, axisConfig)) {
