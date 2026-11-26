@@ -184,7 +184,8 @@ public class FileBasedTaskRepository implements TaskRepository {
             org.wso2.micro.integrator.ntask.core.TaskInfo taskInfo;
             if (taskPaths != null)
                 for (File taskPath : taskPaths) {
-                    if (!taskPath.getName().startsWith("_meta_")) {
+                    if (taskPath.isFile() && !taskPath.getName().startsWith("_meta_")
+                            && !taskPath.getName().startsWith(".")) {
                         try {
                             taskInfo = this.getTaskInfoRegistryPath(taskPath.getAbsolutePath());
                             result.add(taskInfo);
