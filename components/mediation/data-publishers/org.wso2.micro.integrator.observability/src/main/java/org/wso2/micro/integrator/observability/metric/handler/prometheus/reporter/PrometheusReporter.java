@@ -31,8 +31,11 @@ import org.wso2.micro.integrator.observability.util.MetricConstants;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Class for instrumenting Prometheus Metrics.
@@ -63,7 +66,10 @@ public class PrometheusReporter implements MetricReporter {
     private double[] inboundEndpointLatencyBuckets;
     private double[] dataServiceLatencyBuckets;
 
-    private Map<String, Object> metricMap = new HashMap();
+    private Map<String, Object> metricMap = new ConcurrentHashMap<>();
+    private final Map<String, String> componentTypes = new HashMap<>();
+    private final Map<String, String[]> componentLabels = new HashMap<>();
+    private final Set<List<Object>> refusedShapes = new HashSet<>();
 
     @Override
     public void initMetrics() {
@@ -78,8 +84,12 @@ public class PrometheusReporter implements MetricReporter {
     }
 
     @Override
-    public void createMetrics(String serviceType, String type, String metricName, String metricHelp,
+    public synchronized void createMetrics(String serviceType, String type, String metricName, String metricHelp,
                               String[] properties) {
+
+        if (isComponentMetric(lookupKey(serviceType, metricName))) {
+            return;
+        }
 
         proxyLatencyBuckets = new double[]{0.19, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60, 1, 5};
         apiLatencyBuckets = new double[]{0.19, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60, 1, 5};
@@ -169,8 +179,12 @@ public class PrometheusReporter implements MetricReporter {
     }
 
     @Override
-    public void initErrorMetrics(String serviceType, String type, String metricName, String metricHelp,
+    public synchronized void initErrorMetrics(String serviceType, String type, String metricName, String metricHelp,
             String[] properties) {
+
+        if (isComponentMetric(metricName)) {
+            return;
+        }
 
         String[] labels = properties;
 
@@ -264,6 +278,106 @@ public class PrometheusReporter implements MetricReporter {
     public void serviceDown(String serviceName, String serviceType) {
         Gauge gauge = (Gauge) metricMap.get(MetricConstants.SERVICE_UP);
         gauge.labels(serviceName, serviceType).set(0);
+    }
+
+    @Override
+    public synchronized boolean createComponentMetric(String type, String metricName, String metricHelp,
+                                                      String[] labelNames) {
+        // The metric library keeps the array that it gets. So it gets a copy that no caller can change.
+        String[] labels = labelNames == null ? null : labelNames.clone();
+        List<Object> shape = Arrays.asList(metricName, type, labels == null ? null : Arrays.asList(labels));
+        String registeredType = componentTypes.get(metricName);
+        if (registeredType != null) {
+            String[] registeredLabels = componentLabels.get(metricName);
+            if (registeredType.equals(type) && Arrays.equals(registeredLabels, labels)) {
+                return true;
+            }
+            if (refusedShapes.add(shape)) {
+                log.error("Metric " + metricName + " is registered as a " + registeredType + " with the labels "
+                        + Arrays.toString(registeredLabels) + ". It is not registered again as a " + type
+                        + " with the labels " + Arrays.toString(labels) + ".");
+            }
+            return false;
+        }
+        if (!MetricConstants.COUNTER.equals(type) && !MetricConstants.GAUGE.equals(type)) {
+            return false;
+        }
+        if (metricMap.containsKey(metricName)) {
+            if (refusedShapes.add(shape)) {
+                log.error("Metric " + metricName + " is in use by a metric of the server. It is not registered as a "
+                        + type + " with the labels " + Arrays.toString(labels) + ".");
+            }
+            return false;
+        }
+        Set<String> names = new HashSet<>();
+        for (String label : labels) {
+            if (!names.add(label)) {
+                throw new IllegalArgumentException("Duplicate metric label name: " + label);
+            }
+        }
+        Object metric;
+        if (MetricConstants.COUNTER.equals(type)) {
+            metric = Counter.build().name(metricName).help(metricHelp).labelNames(labels).register();
+        } else {
+            metric = Gauge.build().name(metricName).help(metricHelp).labelNames(labels).register();
+        }
+        metricMap.put(metricName, metric);
+        componentTypes.put(metricName, type);
+        componentLabels.put(metricName, labels);
+        return true;
+    }
+
+    @Override
+    public synchronized boolean setGauge(String metricName, String[] labelValues, double value) {
+        if (!MetricConstants.GAUGE.equals(componentTypes.get(metricName)) || labelValues == null
+                || labelValues.length != componentLabels.get(metricName).length) {
+            return false;
+        }
+        ((Gauge) metricMap.get(metricName)).labels(labelValues.clone()).set(value);
+        return true;
+    }
+
+    @Override
+    public synchronized boolean initCounter(String metricName, String[] labelValues) {
+        if (!MetricConstants.COUNTER.equals(componentTypes.get(metricName)) || labelValues == null
+                || labelValues.length != componentLabels.get(metricName).length) {
+            return false;
+        }
+        // Asking for the series makes it with the value 0. A series that exists keeps its value.
+        ((Counter) metricMap.get(metricName)).labels(labelValues.clone());
+        return true;
+    }
+
+    /**
+     * The key under which createMetrics keeps the metric of a service type.
+     */
+    private static String lookupKey(String serviceType, String metricName) {
+        for (SERVICE service : SERVICE.values()) {
+            if (serviceType.equalsIgnoreCase(service.name())) {
+                return metricName;
+            }
+        }
+        if (serviceType.equals(MetricConstants.SERVER)) {
+            return MetricConstants.SERVER_UP;
+        }
+        if (serviceType.equals(MetricConstants.VERSION)) {
+            return MetricConstants.SERVER_VERSION;
+        }
+        return MetricConstants.SERVICE_UP;
+    }
+
+    /**
+     * A key that a component registered stays with the metric of the component. The caller holds the lock of
+     * the reporter, so no component can register the key between this check and the registration.
+     */
+    private boolean isComponentMetric(String key) {
+        String registeredType = componentTypes.get(key);
+        if (registeredType == null) {
+            return false;
+        }
+        log.error("Metric " + key + " is registered as a " + registeredType + " of a component. It is not "
+                + "registered again as a metric of the server.");
+        return true;
     }
 
     enum SERVICE {

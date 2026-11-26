@@ -35,6 +35,7 @@ import org.apache.synapse.commons.json.JsonUtil;
 import org.apache.synapse.rest.RESTConstants;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.json.ParserConfiguration;
 import org.ops4j.pax.logging.PaxLoggingConstants;
 import org.osgi.service.cm.Configuration;
 import org.osgi.service.cm.ConfigurationAdmin;
@@ -56,6 +57,8 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -202,6 +205,71 @@ public class Utils {
      */
     public static boolean isUserAuthenticated(MessageContext messageContext) {
         return !Objects.isNull(getStringPropertyFromMessageContext(messageContext, USERNAME_PROPERTY));
+    }
+
+    /**
+     * Copies the health map of a provider and prints the copy once. A map that can not be read, copied or
+     * printed fails here, inside the catch of the caller. The caller takes the status and the health from this
+     * one copy, so a later change of the map of the provider does not reach the response.
+     *
+     * @param health the health map of a provider
+     * @return the copy
+     */
+    static JSONObject copyHealth(Map<String, Object> health) {
+        JSONObject copy = (JSONObject) copyHealthValue(health, 0);
+        copy.toString(0);
+        return copy;
+    }
+
+    private static Object copyHealthValue(Object value, int depth) {
+        // JSONObject(Map) can turn an exception from reading a nested map into a JSON null.
+        if (value instanceof Map<?, ?> map) {
+            checkHealthDepth(depth);
+            JSONObject object = new JSONObject();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = Objects.requireNonNull(entry.getKey()).toString();
+                Object field = entry.getValue();
+                if (field != null) {
+                    object.put(key, copyHealthValue(field, depth + 1));
+                }
+            }
+            return object;
+        }
+        if (value instanceof List<?> list) {
+            checkHealthDepth(depth);
+            JSONArray array = new JSONArray();
+            for (Object item : list) {
+                array.put(copyHealthValue(item, depth + 1));
+            }
+            return array;
+        }
+        if (value instanceof Number number) {
+            return copyHealthNumber(number);
+        }
+        return JSONObject.wrap(value);
+    }
+
+    private static Number copyHealthNumber(Number number) {
+        if (number instanceof Byte || number instanceof Short || number instanceof Integer || number instanceof Long
+                || number instanceof Float || number instanceof Double || number instanceof BigInteger
+                || number instanceof BigDecimal) {
+            return number;
+        }
+        try {
+            // Sample decimal representations directly so large atomic counters keep their precision.
+            return new BigDecimal(number.toString());
+        } catch (NumberFormatException e) {
+            // A fraction can print as 1/2 even though its numeric value is valid JSON.
+            double value = number.doubleValue();
+            JSONObject.testValidity(value);
+            return value;
+        }
+    }
+
+    private static void checkHealthDepth(int depth) {
+        if (depth > ParserConfiguration.DEFAULT_MAXIMUM_NESTING_DEPTH) {
+            throw new IllegalArgumentException("Health data exceeds the JSON nesting limit");
+        }
     }
 
     public static void setJsonPayLoad(org.apache.axis2.context.MessageContext axis2MessageContext, Object jsonObject) {

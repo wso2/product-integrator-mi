@@ -22,6 +22,10 @@
         </dependency>
         <dependency>
             <groupId>org.wso2.ei</groupId>
+            <artifactId>org.wso2.micro.integrator.connector.core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wso2.ei</groupId>
             <artifactId>org.wso2.micro.integrator.security</artifactId>
             <scope>compile</scope>
         </dependency>
